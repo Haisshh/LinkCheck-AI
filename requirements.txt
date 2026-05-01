@@ -2,6 +2,8 @@
 flask
 gunicorn
 webdriver-manager
+zipfile36
+zipfile
 
 # Analyse de données et Machine Learning
 pandas
