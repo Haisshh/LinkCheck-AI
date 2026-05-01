@@ -3,7 +3,8 @@ import zipfile
 import pandas as pd
 import joblib
 from flask import Flask, request, render_template, jsonify
-from features import extract_features
+# On importe FEATURE_NAMES pour garantir l'ordre des colonnes
+from features import extract_features, FEATURE_NAMES
 
 app = Flask(__name__)
 
@@ -18,29 +19,28 @@ try:
         model = joblib.load(MODEL_PATH)
         print("✅ Modèle IA v1.2 chargé avec succès.")
     else:
-        print("❌ Erreur : model.pkl introuvable à la racine.")
+        print("❌ Erreur : model.pkl introuvable.")
         model = None
 except Exception as e:
     print(f"❌ Erreur lors du chargement du modèle : {e}")
     model = None
 
-# 2. Chargement de la base de réputation Tranco
+# 2. Chargement de la base de réputation Tranco (Top 800k)
 def load_tranco():
     global REPUTATION_DB
     if os.path.exists(TRANCO_ZIP):
         try:
             with zipfile.ZipFile(TRANCO_ZIP) as z:
                 with z.open(z.namelist()[0]) as f:
-                    # On charge les 800 000 premiers domaines
+                    # On charge 800 000 lignes pour une protection maximale
                     df = pd.read_csv(f, header=None, names=['rank', 'domain'], nrows=800000)
                     REPUTATION_DB = dict(zip(df['domain'], df['rank']))
-            print(f"✅ Base Tranco v1.2 chargée ({len(REPUTATION_DB)} domaines).")
+            print(f"✅ Base Tranco v1.2 chargée : {len(REPUTATION_DB)} domaines indexés.")
         except Exception as e:
             print(f"⚠️ Erreur lecture Tranco : {e}")
     else:
-        print(f"⚠️ Fichier {TRANCO_ZIP} introuvable. Whitelist inactive.")
+        print("⚠️ Fichier Tranco introuvable. Whitelist inactive.")
 
-# Lancement au démarrage
 load_tranco()
 
 def get_domain_rank(url):
@@ -49,12 +49,8 @@ def get_domain_rank(url):
     try:
         netloc = urlparse(url).netloc or urlparse("http://"+url).netloc
         domain = netloc.replace('www.', '').lower()
-        
-        # Test direct
         if domain in REPUTATION_DB:
             return REPUTATION_DB[domain]
-        
-        # Test domaine parent (ex: m.hoyolab.com -> hoyolab.com)
         parts = domain.split('.')
         if len(parts) > 2:
             parent = ".".join(parts[-2:])
@@ -70,52 +66,57 @@ def index():
 @app.route('/analyze', methods=['POST'])
 def analyze():
     try:
-        # On récupère les données JSON envoyées par index.html
         data = request.get_json()
         if not data or 'url' not in data:
             return jsonify({"error": "URL manquante"}), 400
         
         url = data['url']
         
-        # 1. ANALYSE IA
+        # --- ÉTAPE 1 : EXTRACTION ET ALIGNEMENT DES FEATURES ---
         if model is None:
-            return jsonify({"error": "Modèle IA non chargé sur le serveur"}), 500
+            return jsonify({"error": "Modèle non chargé"}), 500
 
+        # Extraction via ton script features.py
         features = extract_features(url, "")
-        features_df = pd.DataFrame([features])
         
-        # Probabilités [Sûr, Phishing]
+        # CRUCIAL : On transforme en DataFrame ET on force l'ordre exact des colonnes 
+        # tel qu'il était lors de l'entraînement grâce à FEATURE_NAMES
+        features_df = pd.DataFrame([features])[FEATURE_NAMES]
+        
+        # Prédiction
         probabilities = model.predict_proba(features_df)[0]
         ml_score = round(probabilities[1] * 100)
 
-        # 2. VÉRIFICATION RÉPUTATION
+        # --- ÉTAPE 2 : RÉPUTATION (TRANCO) ---
         rank = get_domain_rank(url)
 
-        # 3. LOGIQUE DE DÉCISION HYBRIDE
+        # --- ÉTAPE 3 : LOGIQUE DE DÉCISION v1.2 ---
         verdict = "safe"
         final_score = ml_score
         reason_text = ""
 
         if rank and rank <= 800000:
-            if ml_score < 95:
+            # Si le site est dans le Top 800k, on bypass l'IA (sauf si score > 98%)
+            if ml_score < 98:
                 verdict = "safe"
-                final_score = round(ml_score * 0.1) # Réduction drastique du risque
-                reason_text = f"Site certifié (Tranco #{rank})."
+                final_score = round(ml_score * 0.05) # Score quasi nul
+                reason_text = f"Site de confiance (Tranco #{rank})."
             else:
                 verdict = "suspect"
-                reason_text = f"Domaine connu (#{rank}), mais l'URL est inhabituelle."
+                reason_text = f"Domaine connu (#{rank}), mais structure d'URL suspecte."
         else:
-            if ml_score > 75: 
+            # Site inconnu : L'IA décide
+            if ml_score > 75:
                 verdict = "dangerous"
                 reason_text = "L'IA détecte des motifs de phishing confirmés."
-            elif ml_score > 35: 
+            elif ml_score > 35:
                 verdict = "suspect"
-                reason_text = "Site inconnu présentant des éléments suspects."
+                reason_text = "Site non répertorié présentant des signes suspects."
             else:
                 verdict = "safe"
-                reason_text = "Analyse structurelle propre (domaine non classé)."
+                reason_text = "Analyse structurelle propre (domaine inconnu)."
 
-        # 4. RÉPONSE JSON (Obligatoire pour éviter l'erreur Unexpected Token)
+        # --- ÉTAPE 4 : RÉPONSE JSON ---
         return jsonify({
             "verdict": verdict,
             "score": final_score,
@@ -129,11 +130,5 @@ def analyze():
         })
 
     except Exception as e:
-        # En cas de crash, on renvoie l'erreur en JSON plutôt que du HTML
-        print(f"💥 ERREUR SERVEUR : {e}")
-        return jsonify({
-            "error": str(e),
-            "verdict": "suspect",
-            "score": 50,
-            "reason_text": "Erreur interne lors de l'analyse."
-        }), 500
+        print(f"💥 ERREUR : {e}")
+        return jsonify({"error": str(e), "verdict": "suspect"}), 500
