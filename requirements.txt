@@ -1,6 +1,7 @@
 # Serveur Web et Framework
 flask
 gunicorn
+webdriver-manager
 
 # Analyse de données et Machine Learning
 pandas
