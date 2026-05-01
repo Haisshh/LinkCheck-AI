@@ -1,31 +1,37 @@
 import re
 from urllib.parse import urlparse
 
-# L'ordre doit être identique à celui de ton entraînement !
+# Liste SYNCHRONISÉE avec ton modèle (fit time)
 FEATURE_NAMES = [
-    'url_length', 'n_dots', 'n_hyphens', 'n_underline', 'n_slash', 
-    'n_question', 'n_equal', 'n_at', 'n_and', 'n_exclamation', 
-    'n_digits', 'n_letters', 'n_specials', 'has_https'
+    'url_length', 
+    'nb_dots', 
+    'nb_hyphens', 
+    'nb_at', 
+    'nb_slash', 
+    'nb_and',
+    'has_brand_in_url', 
+    'has_password_input', 
+    'nb_forms'
 ]
 
 def extract_features(url, html_content=""):
     parsed = urlparse(url)
-    hostname = parsed.netloc
+    hostname = parsed.netloc.lower()
+    url_lower = url.lower()
     
+    # Dictionnaire de base
     features = {
         'url_length': len(url),
-        'n_dots': url.count('.'),
-        'n_hyphens': url.count('-'),
-        'n_underline': url.count('_'),
-        'n_slash': url.count('/'),
-        'n_question': url.count('?'),
-        'n_equal': url.count('='),
-        'n_at': url.count('@'),
-        'n_and': url.count('&'),
-        'n_exclamation': url.count('!'),
-        'n_digits': sum(c.isdigit() for c in url),
-        'n_letters': sum(c.isalpha() for c in url),
-        'n_specials': sum(not c.isalnum() for c in url),
-        'has_https': 1 if parsed.scheme == 'https' else 0
+        'nb_dots': url.count('.'),
+        'nb_hyphens': url.count('-'),
+        'nb_at': url.count('@'),
+        'nb_slash': url.count('/'),
+        'nb_and': url.count('&'),
+        # Détection de marques connues (pour has_brand_in_url)
+        'has_brand_in_url': 1 if any(brand in hostname for brand in ['google', 'microsoft', 'apple', 'facebook', 'hoyolab', 'mihoyo']) else 0,
+        # Analyse du contenu HTML (si fourni)
+        'has_password_input': 1 if 'type="password"' in html_content.lower() or 'type=\'password\'' in html_content.lower() else 0,
+        'nb_forms': html_content.count('<form')
     }
+    
     return features
