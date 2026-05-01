@@ -1,7 +1,7 @@
 import re
 from urllib.parse import urlparse
 
-# Cette liste est l'ordre EXACT réclamé par ton erreur "seen at fit time"
+# L'ordre doit être EXACTEMENT celui-ci d'après ton dernier message d'erreur
 FEATURE_NAMES = [
     'url_length', 
     'nb_dots', 
@@ -20,13 +20,10 @@ def extract_features(url, html_content=""):
     parsed = urlparse(url)
     hostname = parsed.netloc.lower()
     
-    # Calcul des nouvelles features demandées par ton modèle
-    # prefix_suffix : souvent 1 si le domaine contient un tiret '-'
-    prefix_suffix = 1 if '-' in hostname else 0
-    
-    # nb_subdomains : nombre de parties dans le domaine (ex: m.hoyolab.com = 3)
+    # Calcul des champs demandés
     subdomains = hostname.split('.')
     nb_subdomains = len(subdomains)
+    prefix_suffix = 1 if '-' in hostname else 0
 
     features = {
         'url_length': len(url),
@@ -34,12 +31,13 @@ def extract_features(url, html_content=""):
         'nb_hyphens': url.count('-'),
         'nb_at': url.count('@'),
         'nb_slash': url.count('/'),
-        'has_brand_in_url': 1 if any(b in hostname for b in ['google', 'fb', 'microsoft', 'apple', 'hoyolab']) else 0,
+        'has_brand_in_url': 1 if any(b in hostname for b in ['google', 'microsoft', 'apple', 'facebook', 'hoyolab']) else 0,
         'has_password_input': 1 if 'type="password"' in html_content.lower() else 0,
         'nb_forms': html_content.count('<form'),
-        'nb_hyperlinks': html_content.count('<a href='), # Nombre de liens 
+        'nb_hyperlinks': html_content.count('<a href='),
         'nb_subdomains': nb_subdomains,
         'prefix_suffix': prefix_suffix
     }
     
-    return features
+    # On ne retourne que les colonnes que l'IA connaît
+    return {k: features[k] for k in FEATURE_NAMES}
