@@ -1,138 +1,123 @@
-"""
-main.py — Serveur Flask LinkCheck.
-
-CORRECTIONS :
-  - analyze_url() importée depuis analyzer.py — main.py ne réimplémente plus rien
-  - model None vérifié avant predict_proba (évite le crash si model.pkl absent)
-  - Whitelist vérifiée sur le domaine parsé, pas sur l'URL brute
-    (évite le faux positif "http://evil.com/lycee-passwords")
-  - urlparse importé en haut — pas à l'intérieur d'une fonction
-  - Rate limiting + threaded=True conservés
-"""
+# main.py
+# Serveur Flask LinkCheck — point d'entrée HTTP.
+# Toute la logique d'analyse est dans analyzer.py.
 
 import os
 import re
 import time
-import logging
 import zipfile
+import logging
 from collections import defaultdict
 from urllib.parse import urlparse
 
 import pandas as pd
-import joblib
-from flask import Flask, request, render_template, jsonify, send_file
+from flask import Flask, jsonify, render_template, request, send_file
 
-from analyzer import analyze_url   # source unique d'analyse — pas de doublon
+from analyzer import analyze_url
 
-# ── Logs ───────────────────────────────────────────────────────────────────────
+# ── Logging ───────────────────────────────────────────────────────────────────
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
-    datefmt="%H:%M:%S"
+    datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("linkcheck.main")
 
+# ── App Flask ─────────────────────────────────────────────────────────────────
+
 app = Flask(__name__)
 
-# ── Tranco (réputation de domaine) ────────────────────────────────────────────
-TRANCO_ZIP    = "data/tranco_GV97K-1m.csv.zip"
-REPUTATION_DB: dict[str, int] = {}
+# ── Tranco ────────────────────────────────────────────────────────────────────
+
+_TRANCO_PATH = "data/tranco_GV97K-1m.csv.zip"
+_REPUTATION: dict[str, int] = {}
 
 
-def load_tranco():
-    global REPUTATION_DB
-    if not os.path.exists(TRANCO_ZIP):
-        logger.info("[main] Tranco introuvable — vérification de réputation désactivée")
+def _load_tranco() -> None:
+    global _REPUTATION
+    if not os.path.exists(_TRANCO_PATH):
+        logger.info("[main] Tranco absent — réputation désactivée")
         return
     try:
-        with zipfile.ZipFile(TRANCO_ZIP) as z:
-            with z.open(z.namelist()[0]) as f:
-                df = pd.read_csv(f, header=None, names=["rank", "domain"], nrows=800_000)
-                REPUTATION_DB = dict(zip(df["domain"], df["rank"]))
-        logger.info("[main] Tranco chargé : %d domaines", len(REPUTATION_DB))
+        with zipfile.ZipFile(_TRANCO_PATH) as z, z.open(z.namelist()[0]) as f:
+            df = pd.read_csv(f, header=None, names=["rank", "domain"], nrows=800_000)
+            _REPUTATION = dict(zip(df["domain"], df["rank"]))
+        logger.info("[main] Tranco chargé : %d domaines", len(_REPUTATION))
     except Exception as e:
-        logger.error("[main] Erreur chargement Tranco : %s", e)
+        logger.error("[main] Tranco KO : %s", e)
 
 
-load_tranco()
+_load_tranco()
 
-# ── Rate limiting ──────────────────────────────────────────────────────────────
-_rate_data: dict[str, list[float]] = defaultdict(list)
-RATE_LIMIT  = 30   # requêtes max
-RATE_WINDOW = 60   # par fenêtre en secondes
+# ── Rate limiting (in-memory, par IP) ─────────────────────────────────────────
+
+_RATE: dict[str, list[float]] = defaultdict(list)
+_LIMIT, _WINDOW = 30, 60  # 30 req / 60 s
 
 
-def _check_rate_limit(ip: str) -> bool:
-    now    = time.time()
-    cutoff = now - RATE_WINDOW
-    _rate_data[ip] = [t for t in _rate_data[ip] if t > cutoff]
-    if len(_rate_data[ip]) >= RATE_LIMIT:
-        logger.warning("[rate-limit] %s bloquée (%d req/%ds)", ip, len(_rate_data[ip]), RATE_WINDOW)
+def _rate_ok(ip: str) -> bool:
+    now    = time.monotonic()
+    cutoff = now - _WINDOW
+    bucket = _RATE[ip] = [t for t in _RATE[ip] if t > cutoff]
+    if len(bucket) >= _LIMIT:
+        logger.warning("[rate] %s bloquée (%d req)", ip, len(bucket))
         return False
-    _rate_data[ip].append(now)
+    bucket.append(now)
     return True
 
 
-def _get_ip() -> str:
-    fwd = request.headers.get("X-Forwarded-For")
+def _client_ip() -> str:
+    fwd = request.headers.get("X-Forwarded-For", "")
     return fwd.split(",")[0].strip() if fwd else (request.remote_addr or "unknown")
 
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
+# ── Routes ────────────────────────────────────────────────────────────────────
 
-@app.route("/")
+@app.get("/")
 def index():
     return render_template("index.html")
 
 
-@app.route("/analyze", methods=["POST"])
+@app.post("/analyze")
 def analyze():
-    ip = _get_ip()
-    if not _check_rate_limit(ip):
-        return jsonify({"error": "Trop de requêtes. Limite : 30/minute."}), 429
+    ip = _client_ip()
+    if not _rate_ok(ip):
+        return jsonify({"error": "Trop de requêtes — limite : 30/min"}), 429
 
-    data = request.get_json(silent=True)
-    if not data or "url" not in data:
-        return jsonify({"error": "Champ 'url' manquant"}), 400
+    body = request.get_json(silent=True) or {}
+    url  = str(body.get("url", "")).strip()
 
-    url = str(data.get("url", "")).strip()
     if not url:
         return jsonify({"error": "URL vide"}), 400
     if len(url) > 2000:
         return jsonify({"error": "URL trop longue (max 2000 car.)"}), 400
 
-    logger.info("[main] Analyse demandée par %s : %s", ip, url[:80])
-
-    # Délègue TOUT à analyzer.py — main.py ne fait aucune analyse
+    logger.info("[main] %s → %s", ip, url[:80])
     result = analyze_url(url)
 
-    # Enrichissement Tranco si domaine connu
+    # Enrichissement Tranco
     domain = result.get("analyzed_host", "")
-    rank   = (
-        REPUTATION_DB.get(domain)
-        or REPUTATION_DB.get(".".join(domain.split(".")[-2:]))
-    )
-    if rank:
-        result["tranco_rank"] = rank
-        # Un domaine très bien classé (top 10 000) abaisse le score final
-        if rank <= 10_000 and result["verdict"] != "safe":
-            result["score"]   = round(result["score"] * 0.3)
-            result["verdict"] = "safe" if result["score"] <= 30 else "suspect"
-            result["reasons"].insert(0, {
-                "text":     f"Domaine bien classé Tranco (rang #{rank})",
-                "points":   0,
-                "severity": "safe"
-            })
-    else:
-        result["tranco_rank"] = None
+    rank   = _REPUTATION.get(domain) or _REPUTATION.get(".".join(domain.split(".")[-2:]))
+    result["tranco_rank"] = rank
+
+    if rank and rank <= 10_000 and result["verdict"] != "safe":
+        result["score"]   = round(result["score"] * 0.3)
+        result["verdict"] = "safe" if result["score"] <= 30 else "suspect"
+        result["reasons"].insert(0, {
+            "text": f"Domaine bien classé Tranco (rang #{rank})",
+            "points": 0, "severity": "safe",
+        })
 
     return jsonify(result)
 
 
-@app.route("/screenshot/<path:hostname>")
-def get_screenshot(hostname: str):
-    """Polling endpoint — retourne la capture quand elle est prête."""
-    safe = re.sub(r'[^a-zA-Z0-9_\-]', '', hostname)[:40]
+_RE_SAFE = re.compile(r'[^a-zA-Z0-9_\-]')
+
+@app.get("/screenshot/<path:hostname>")
+def screenshot(hostname: str):
+    """Polling : retourne l'image si prête, 202 sinon."""
+    safe = _RE_SAFE.sub("", hostname)[:40]
     path = os.path.join("static", "screenshots", f"{safe}.png")
     if os.path.exists(path):
         return send_file(path, mimetype="image/png")
@@ -140,18 +125,18 @@ def get_screenshot(hostname: str):
 
 
 @app.errorhandler(404)
-def not_found(e):
-    return jsonify({"error": "Endpoint introuvable"}), 404
+def _404(e):
+    return jsonify({"error": "Introuvable"}), 404
 
 
 @app.errorhandler(500)
-def server_error(e):
-    logger.error("[main] Erreur 500 : %s", e)
-    return jsonify({"error": "Erreur interne du serveur"}), 500
+def _500(e):
+    logger.error("[main] 500 : %s", e)
+    return jsonify({"error": "Erreur serveur"}), 500
 
 
-# ── Lancement ──────────────────────────────────────────────────────────────────
+# ── Lancement ─────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    logger.info("[main] Démarrage — rate limit : %d req/%ds", RATE_LIMIT, RATE_WINDOW)
-    # threaded=True obligatoire : sans ça, le screenshot async bloque quand même Flask
+    logger.info("[main] Démarrage — %d req/%ds", _LIMIT, _WINDOW)
     app.run(debug=True, threaded=True)

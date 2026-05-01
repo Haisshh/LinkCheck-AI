@@ -1,112 +1,94 @@
-"""
-screenshot.py — Capture d'écran non bloquante via un thread dédié.
-
-CORRECTIONS :
-  - La capture tourne dans un ThreadPoolExecutor séparé → Flask n'est
-    JAMAIS bloqué. Les autres requêtes sont servies pendant ce temps.
-  - Un seul worker dans le pool : pas de 10 Chrome en parallèle.
-  - Logs détaillés : timeout, connexion refusée, Chrome manquant...
-  - Cache : si la capture existe déjà, on ne relance pas Chrome.
-"""
+# screenshot.py
+# Capture d'écran asynchrone via Selenium Chrome headless.
+# Un seul worker → jamais plusieurs Chrome en parallèle.
+# Flask n'est jamais bloqué.
 
 import os
 import re
 import time
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, Future
+from typing import Optional
 
-# Pool d'UN seul worker → un seul Chrome à la fois, jamais en parallèle
-_executor = ThreadPoolExecutor(max_workers=1)
+logger    = logging.getLogger("linkcheck.screenshot")
+_POOL     = ThreadPoolExecutor(max_workers=1, thread_name_prefix="screenshot")
+_SHOT_DIR = os.path.join("static", "screenshots")
+_RE_SAFE  = re.compile(r'[^a-zA-Z0-9\-]')
 
-SCREENSHOT_DIR = os.path.join("static", "screenshots")
+_CHROME_ARGS = (
+    "--headless=new",
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--window-size=1280,720",
+    "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+)
 
-logger = logging.getLogger("linkcheck.screenshot")
 
-
-def _build_filename(url: str) -> str:
-    clean = re.sub(r'[^a-zA-Z0-9\-]', '_', url)
-    return clean[:60]
-
-
-def _do_capture(url: str, filepath: str) -> str | None:
-    """Exécutée dans le thread secondaire — jamais dans le thread Flask."""
+def _do_capture(url: str, path: str) -> Optional[str]:
+    """Tourne dans le thread secondaire. Jamais appelé depuis Flask directement."""
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
     from selenium.common.exceptions import TimeoutException, WebDriverException
 
-    options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1280,720")
-    options.add_argument(
-        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
-    )
+    opts = Options()
+    for arg in _CHROME_ARGS:
+        opts.add_argument(arg)
 
     driver = None
-    t0 = time.time()
+    t0     = time.monotonic()
     try:
-        logger.info(f"[screenshot] Démarrage Chrome pour : {url}")
-        driver = webdriver.Chrome(options=options)
+        driver = webdriver.Chrome(options=opts)
         driver.set_page_load_timeout(15)
         driver.get(url)
         time.sleep(2)
-        driver.save_screenshot(filepath)
-        elapsed = round(time.time() - t0, 1)
-        logger.info(f"[screenshot] Capture OK en {elapsed}s → {filepath}")
-        return filepath
+        driver.save_screenshot(path)
+        logger.info("[screenshot] OK %.1fs → %s", time.monotonic() - t0, path)
+        return path
 
     except TimeoutException:
-        logger.warning(f"[screenshot] Timeout (>15s) — le site ne répond pas : {url}")
-        return None
+        logger.warning("[screenshot] Timeout >15s : %s", url)
     except WebDriverException as e:
-        msg = str(e).split("\n")[0]  # première ligne seulement, pas de stack complète
-        if "net::ERR_NAME_NOT_RESOLVED" in msg:
-            logger.warning(f"[screenshot] Domaine inexistant : {url}")
-        elif "net::ERR_CONNECTION_REFUSED" in msg:
-            logger.warning(f"[screenshot] Connexion refusée : {url}")
-        elif "net::ERR_CONNECTION_TIMED_OUT" in msg:
-            logger.warning(f"[screenshot] Connexion expirée : {url}")
-        elif "chrome not reachable" in msg.lower() or "session not created" in msg.lower():
-            logger.error("[screenshot] Chrome introuvable — vérifiez que Chromium est installé")
+        first_line = str(e).split("\n")[0]
+        if "ERR_NAME_NOT_RESOLVED" in first_line:
+            logger.warning("[screenshot] Domaine inexistant : %s", url)
+        elif "ERR_CONNECTION_REFUSED" in first_line:
+            logger.warning("[screenshot] Connexion refusée : %s", url)
+        elif "ERR_CONNECTION_TIMED_OUT" in first_line:
+            logger.warning("[screenshot] Connexion expirée : %s", url)
+        elif "session not created" in first_line.lower():
+            logger.error("[screenshot] Chrome introuvable — installez Chromium")
         else:
-            logger.error(f"[screenshot] Erreur WebDriver : {msg}")
-        return None
+            logger.error("[screenshot] WebDriver : %s", first_line)
     except Exception as e:
-        logger.error(f"[screenshot] Erreur inattendue : {type(e).__name__}: {e}")
-        return None
+        logger.error("[screenshot] %s : %s", type(e).__name__, e)
     finally:
         if driver:
             try:
                 driver.quit()
             except Exception:
                 pass
+    return None
 
 
-def take_screenshot_async(url: str, filename: str = None):
+def take_screenshot_async(url: str, filename: Optional[str] = None) -> Future:
     """
-    Lance la capture dans un thread secondaire et retourne un Future.
-    Flask continue de répondre aux autres requêtes pendant ce temps.
-
-    Utilisation dans analyzer.py :
-        future = take_screenshot_async(url, name)
-        # ... on peut faire autre chose ...
-        path = future.result(timeout=30)  # attend max 30s si nécessaire
+    Planifie une capture dans le thread secondaire et retourne immédiatement.
+    Flask peut traiter d'autres requêtes pendant ce temps.
+    Le résultat est accessible via GET /screenshot/<hostname>.
     """
-    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+    os.makedirs(_SHOT_DIR, exist_ok=True)
 
-    if filename is None:
-        filename = _build_filename(url)
+    if not filename:
+        filename = _RE_SAFE.sub("_", url)[:60]
 
-    filepath = os.path.join(SCREENSHOT_DIR, f"{filename}.png")
+    filepath = os.path.join(_SHOT_DIR, f"{filename}.png")
 
-    # Cache : si la capture existe déjà, on retourne un Future déjà résolu
+    # Cache : pas de Chrome si l'image existe déjà
     if os.path.exists(filepath):
-        logger.debug(f"[screenshot] Cache hit : {filepath}")
-        future = _executor.submit(lambda: filepath)
-        return future
+        logger.debug("[screenshot] Cache hit : %s", filepath)
+        return _POOL.submit(lambda: filepath)
 
-    logger.info(f"[screenshot] Capture planifiée (async) pour : {url}")
-    return _executor.submit(_do_capture, url, filepath)
+    logger.info("[screenshot] Planifié : %s", url)
+    return _POOL.submit(_do_capture, url, filepath)
