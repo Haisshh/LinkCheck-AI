@@ -12,46 +12,54 @@ MODEL_PATH = "model.pkl"
 TRANCO_ZIP = "data/tranco_GV97K-1m.csv.zip"
 REPUTATION_DB = {}
 
-# 1. Chargement du Modèle IA
+# 1. Chargement du Modèle IA (model.pkl)
 try:
-    model = joblib.load(MODEL_PATH)
-    print("✅ Modèle IA chargé avec succès.")
+    if os.path.exists(MODEL_PATH):
+        model = joblib.load(MODEL_PATH)
+        print("✅ Modèle IA v1.2 chargé avec succès.")
+    else:
+        print("❌ Erreur : model.pkl introuvable.")
+        model = None
 except Exception as e:
-    print(f"❌ Erreur chargement modèle : {e}")
+    print(f"❌ Erreur lors du chargement du modèle : {e}")
     model = None
 
-# 2. Chargement de la base Tranco en mémoire (RAM)
+# 2. Chargement de la base de réputation Tranco (Top 800k)
 def load_tranco():
     global REPUTATION_DB
     if os.path.exists(TRANCO_ZIP):
         try:
             with zipfile.ZipFile(TRANCO_ZIP) as z:
                 with z.open(z.namelist()[0]) as f:
-                    # On charge les 800 000 premiers pour un équilibre RAM/Performance
+                    # On charge 800k lignes pour protéger les sites légitimes
                     df = pd.read_csv(f, header=None, names=['rank', 'domain'], nrows=800000)
                     REPUTATION_DB = dict(zip(df['domain'], df['rank']))
-            print(f"✅ Base Tranco v1.2 chargée : {len(REPUTATION_DB)} domaines indexés.")
+            print(f"✅ Base Tranco chargée : {len(REPUTATION_DB)} domaines indexés.")
         except Exception as e:
             print(f"⚠️ Erreur lecture Tranco : {e}")
     else:
-        print("⚠️ Fichier Tranco introuvable dans data/. La whitelist sera inactive.")
+        print("⚠️ Fichier data/tranco_GV97K-1m.csv.zip introuvable. Whitelist inactive.")
 
-# Lancement du chargement au démarrage du serveur
+# On pré-charge les données au lancement du serveur
 load_tranco()
 
 def get_domain_rank(url):
-    """Extrait le domaine et vérifie son rang Tranco"""
+    """Extrait le domaine racine et cherche son rang Tranco"""
     from urllib.parse import urlparse
     try:
-        domain = urlparse(url).netloc.replace('www.', '').lower()
-        # Test du domaine exact
+        # Nettoyage (m.hoyolab.com -> hoyolab.com)
+        netloc = urlparse(url).netloc or urlparse("http://"+url).netloc
+        domain = netloc.replace('www.', '').lower()
+        
+        # Test direct
         if domain in REPUTATION_DB:
             return REPUTATION_DB[domain]
-        # Test du domaine parent (ex: m.hoyolab.com -> hoyolab.com)
+        
+        # Test domaine parent
         parts = domain.split('.')
         if len(parts) > 2:
-            parent_domain = ".".join(parts[-2:])
-            return REPUTATION_DB.get(parent_domain)
+            parent = ".".join(parts[-2:])
+            return REPUTATION_DB.get(parent)
     except:
         return None
     return None
@@ -62,51 +70,65 @@ def index():
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    url = request.form.get('url')
-    if not url:
-        return render_template('index.html', error="Veuillez entrer une URL.")
-
-    # --- ÉTAPE 1 : IA ---
-    # Extraction des caractéristiques (on passe html="" car on ne scrape pas en temps réel ici)
+    # Ton index.html envoie du JSON, on le récupère ici
+    data = request.get_json()
+    if not data or 'url' not in data:
+        return jsonify({"error": "URL manquante"}), 400
+    
+    url = data['url']
+    
+    # --- ANALYSE IA ---
+    # On passe html="" car l'analyse en direct ne scrape pas (pour la rapidité)
     features = extract_features(url, "")
     features_df = pd.DataFrame([features])
     
-    # Calcul de la probabilité de phishing (0 à 100)
-    proba_phishing = model.predict_proba(features_df)[0][1] * 100
+    # Calcul de la probabilité via le modèle Scikit-Learn
+    # proba[0] = safe, proba[1] = phishing
+    if model:
+        probabilities = model.predict_proba(features_df)[0]
+        ml_score = round(probabilities[1] * 100)
+    else:
+        ml_score = 50 # Valeur par défaut si modèle HS
 
-    # --- ÉTAPE 2 : RÉPUTATION (TRANCO) ---
+    # --- VÉRIFICATION RÉPUTATION (TRANCO) ---
     rank = get_domain_rank(url)
 
-    # --- ÉTAPE 3 : LOGIQUE DE DÉCISION v1.2 ---
-    status = "SAFE"
-    final_score = proba_phishing
-    reason = ""
+    # --- LOGIQUE DE DÉCISION HYBRIDE V1.2 ---
+    verdict = "safe"
+    final_score = ml_score
+    reason_text = ""
 
-    if rank is not None and rank <= 800000:
-        # Le site est connu (Top 800k)
-        if proba_phishing < 95:
-            status = "SAFE"
-            final_score = proba_phishing * 0.1 # On réduit l'importance de l'IA
-            reason = f"Domaine de confiance vérifié (Tranco #{rank})."
+    if rank and rank <= 800000:
+        # Site connu : On devient très indulgent
+        if ml_score < 95:
+            verdict = "safe"
+            final_score = round(ml_score * 0.1) # On divise le risque par 10
+            reason_text = f"Site de confiance identifié (Rang mondial Tranco #{rank})."
         else:
-            # Cas rare : un site connu mais l'URL est vraiment bizarre (ex: redirection suspecte)
-            status = "SUSPICIOUS"
-            reason = f"Domaine connu (#{rank}), mais l'URL présente des anomalies critiques."
+            # Cas extrême : site connu mais URL vraiment malveillante
+            verdict = "suspect"
+            reason_text = f"Domaine connu (#{rank}), mais l'URL présente des signes d'anomalie."
     else:
-        # Le site est inconnu (IA seule juge)
-        if proba_phishing > 80:
-            status = "DANGEREUX"
-            reason = "L'IA a détecté des caractéristiques typiques de phishing."
-        elif proba_phishing > 40:
-            status = "SUSPICIOUS"
-            reason = "Site non répertorié présentant des éléments suspects."
+        # Site inconnu : L'IA est seule juge
+        if ml_score > 75:
+            verdict = "dangerous"
+            reason_text = "L'IA détecte une forte ressemblance avec des sites de phishing."
+        elif ml_score > 35:
+            verdict = "suspect"
+            reason_text = "Site non répertorié présentant des caractéristiques suspectes."
         else:
-            status = "SAFE"
-            reason = "Site inconnu mais l'analyse structurelle est propre."
+            verdict = "safe"
+            reason_text = "Analyse structurelle propre sur un domaine non répertorié."
 
-    return render_template('result.html', 
-                           url=url, 
-                           status=status, 
-                           score=round(final_score, 1), 
-                           reason=reason,
-                           rank=rank)
+    # On renvoie les données attendues par ton JavaScript dans index.html
+    return jsonify({
+        "verdict": verdict,
+        "score": final_score,
+        "ml_score": ml_score,
+        "analyzed_host": url,
+        "rank": rank,
+        "reason_text": reason_text,
+        "reasons": [
+            {"text": reason_text, "severity": "info" if verdict == "safe" else "warning", "points": 0}
+        ]
+    })
