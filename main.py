@@ -8,24 +8,21 @@ from features import extract_features, FEATURE_NAMES
 
 app = Flask(__name__)
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION V1.2 ---
 MODEL_PATH = "model.pkl"
 TRANCO_ZIP = "data/tranco_GV97K-1m.csv.zip"
 REPUTATION_DB = {}
 
-# Système de limitation (Anti-Spam simple)
-last_requests = {}
-
-# 1. Chargement du Modèle
+# 1. Chargement du Modèle IA
 model = None
 if os.path.exists(MODEL_PATH):
     try:
         model = joblib.load(MODEL_PATH)
-        print("✅ Modèle IA chargé.")
-    except:
-        print("❌ Erreur chargement modèle.")
+        print("✅ Modèle IA v1.2 chargé.")
+    except Exception as e:
+        print(f"❌ Erreur modèle : {e}")
 
-# 2. Chargement Tranco
+# 2. Chargement Tranco (Top 800 000)
 def load_tranco():
     global REPUTATION_DB
     if os.path.exists(TRANCO_ZIP):
@@ -34,34 +31,40 @@ def load_tranco():
                 with z.open(z.namelist()[0]) as f:
                     df = pd.read_csv(f, header=None, names=['rank', 'domain'], nrows=800000)
                     REPUTATION_DB = dict(zip(df['domain'], df['rank']))
-            print(f"✅ Base Tranco : {len(REPUTATION_DB)} sites.")
+            print(f"✅ Base Tranco : {len(REPUTATION_DB)} domaines indexés.")
         except Exception as e:
             print(f"❌ Erreur Tranco : {e}")
     else:
-        print("⚠️ Fichier Tranco manquant !")
+        print("⚠️ data/tranco_GV97K-1m.csv.zip introuvable.")
 
 load_tranco()
 
+# --- FONCTIONS DE VÉRIFICATION ---
+
 def get_domain_rank(url):
-    """Extraction ultra-robuste du domaine"""
     from urllib.parse import urlparse
     try:
-        # Nettoyer l'URL
-        clean_url = url.split('#')[0].split('?')[0] # Enlever les fragments (#) et paramètres (?)
+        clean_url = url.split('#')[0].split('?')[0]
         netloc = urlparse(clean_url).netloc or urlparse("http://"+clean_url).netloc
         domain = netloc.replace('www.', '').lower()
-        
-        # Test 1: m.hoyolab.com
         if domain in REPUTATION_DB: return REPUTATION_DB[domain]
-        
-        # Test 2: hoyolab.com (si c'est un sous-domaine)
         parts = domain.split('.')
         if len(parts) > 2:
             root = ".".join(parts[-2:])
             if root in REPUTATION_DB: return REPUTATION_DB[root]
-    except:
-        return None
+    except: return None
     return None
+
+def is_trusted_institution(url):
+    """Protection pour les sites éducatifs (.fr) et officiels"""
+    url = url.lower()
+    trusted_extensions = ['.gouv.fr', '.ac-', 'edulib.fr', 'education.fr']
+    if any(ext in url for ext in trusted_extensions): return True
+    if "lycee-" in url and url.endswith(".fr"): return True
+    # Hard-whitelist pour les géants souvent faux-positifs
+    hard_white = ['hoyolab.com', 'mihoyo.com', 'discord.com', 'google.com']
+    if any(site in url for site in hard_white): return True
+    return False
 
 @app.route('/')
 def index():
@@ -69,50 +72,49 @@ def index():
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    # --- SÉCURITÉ ANTI-SPAM ---
-    user_ip = request.remote_addr
-    now = time.time()
-    if user_ip in last_requests and now - last_requests[user_ip] < 2: # Max 1 requête toutes les 2 sec
-        return jsonify({"verdict": "suspect", "score": 0, "reason_text": "Trop de requêtes ! Attendez un peu."}), 429
-    last_requests[user_ip] = now
-
     try:
         data = request.get_json()
-        url = data.get('url', '').lower()
-        
-        # --- FILTRE DE SECOURS (HARD-WHITELIST) ---
-        # Si l'IA bug, on force les sites connus ici
-        trusted_keywords = ['hoyolab.com', 'mihoyo.com', 'google.com', 'discord.com', 'github.com']
-        if any(k in url for k in trusted_keywords):
+        url = data.get('url', '')
+        if not url: return jsonify({"error": "Lien vide"}), 400
+
+        # 1. Priorité absolue : Whitelist Institutionnelle
+        if is_trusted_institution(url):
             return jsonify({
-                "verdict": "safe", "score": 0, "ml_score": 0, "analyzed_host": url,
-                "rank": 1, "reason_text": "Site de confiance certifié (Protection V1.2)"
+                "verdict": "safe", "score": 0, "ml_score": 0, 
+                "analyzed_host": url, "rank": "Certifié",
+                "reason_text": "Site institutionnel ou de confiance certifié.",
+                "reasons": [{"text": "Domaine officiel reconnu", "severity": "info", "points": 0}]
             })
 
-        # --- ANALYSE IA ---
+        # 2. Analyse IA (avec correction de l'ordre des colonnes)
         features = extract_features(url, "")
         features_df = pd.DataFrame([features])[FEATURE_NAMES]
-        probabilities = model.predict_proba(features_df)[0]
-        ml_score = round(probabilities[1] * 100)
+        proba = model.predict_proba(features_df)[0][1] * 100
+        ml_score = round(proba)
 
-        # --- LOGIQUE TRANCO ---
+        # 3. Vérification Tranco
         rank = get_domain_rank(url)
+
+        # 4. Décision Hybride
         verdict = "safe"
         final_score = ml_score
         
         if rank:
-            verdict = "safe"
-            final_score = 0
+            # Site connu : On divise le risque par 20
+            final_score = round(ml_score * 0.05)
+            verdict = "safe" if final_score < 30 else "suspect"
             reason = f"Vérifié par Tranco (Rang #{rank})"
         else:
-            if ml_score > 70: verdict = "dangerous"
-            elif ml_score > 30: verdict = "suspect"
-            reason = "Analyse IA : Domaine non répertorié."
+            if ml_score > 75: verdict = "dangerous"
+            elif ml_score > 40: verdict = "suspect"
+            reason = "Analyse IA sur domaine non répertorié."
 
         return jsonify({
             "verdict": verdict, "score": final_score, "ml_score": ml_score,
-            "analyzed_host": url, "rank": rank, "reason_text": reason
+            "analyzed_host": url, "rank": rank, "reason_text": reason,
+            "reasons": [{"text": reason, "severity": "info" if verdict=="safe" else "warning", "points": 0}]
         })
 
     except Exception as e:
+        print(f"💥 Erreur : {e}")
         return jsonify({"error": str(e), "verdict": "suspect"}), 500
