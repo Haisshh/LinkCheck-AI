@@ -17,7 +17,7 @@ model = None
 if os.path.exists(MODEL_PATH):
     try:
         model = joblib.load(MODEL_PATH)
-        print("✅ Modèle IA chargé.")
+        print("✅ Modèle IA synchronisé et chargé.")
     except Exception as e:
         print(f"❌ Erreur modèle: {e}")
 
@@ -30,7 +30,7 @@ def load_tranco():
                 with z.open(z.namelist()[0]) as f:
                     df = pd.read_csv(f, header=None, names=['rank', 'domain'], nrows=800000)
                     REPUTATION_DB = dict(zip(df['domain'], df['rank']))
-            print(f"✅ Tranco chargé ({len(REPUTATION_DB)} sites).")
+            print(f"✅ Tranco v1.2 chargé.")
         except:
             print("❌ Erreur Tranco.")
 load_tranco()
@@ -41,8 +41,10 @@ def get_domain_info(url):
         netloc = urlparse(url).netloc or urlparse("http://"+url).netloc
         domain = netloc.replace('www.', '').lower()
         rank = REPUTATION_DB.get(domain)
-        if not rank and len(domain.split('.')) > 2:
-            rank = REPUTATION_DB.get(".".join(domain.split('.')[-2:]))
+        if not rank:
+            parts = domain.split('.')
+            if len(parts) > 2:
+                rank = REPUTATION_DB.get(".".join(parts[-2:]))
         return domain, rank
     except:
         return None, None
@@ -60,39 +62,37 @@ def analyze():
 
         domain, rank = get_domain_info(url)
         
-        # --- FILTRE DE CONFIANCE (Lycées, Gouv, HoYoLAB) ---
-        is_trusted = False
+        # --- FILTRE DE CONFIANCE (SÉCURITÉ LYCÉE/HOYOLAB) ---
         if any(x in url.lower() for x in ['.gouv.fr', '.ac-', 'lycee-', 'hoyolab.com', 'mihoyo.com']):
-            is_trusted = True
+            return jsonify({
+                "verdict": "safe", "score": 0, "ml_score": 0, "analyzed_host": domain,
+                "rank": "Certifié", "reason_text": "Site institutionnel ou certifié Safe.",
+                "reasons": [{"text": "Source officielle reconnue", "severity": "info", "points": 0}]
+            })
 
         # --- ANALYSE IA ---
-        # On passe un html vide par défaut pour éviter de bloquer
         features = extract_features(url, html_content="")
-        # Tri des colonnes exactement comme à l'entraînement
+        # On force l'ordre des colonnes EXACT de FEATURE_NAMES
         features_df = pd.DataFrame([features])[FEATURE_NAMES]
         
         ml_proba = model.predict_proba(features_df)[0][1] * 100
         ml_score = round(ml_proba)
 
-        # --- LOGIQUE FINALE ---
-        if is_trusted or (rank and rank <= 800000):
+        # --- DÉCISION TRANCO ---
+        if rank and rank <= 800000:
             verdict = "safe"
-            score = round(ml_score * 0.05)
-            reason = f"Site de confiance vérifié (Tranco #{rank if rank else 'Certifié'})"
+            final_score = round(ml_score * 0.05)
+            reason = f"Domaine de confiance (Tranco #{rank})"
         else:
-            score = ml_score
-            if score > 75: verdict = "dangerous"
-            elif score > 40: verdict = "suspect"
+            final_score = ml_score
+            if final_score > 75: verdict = "dangerous"
+            elif final_score > 40: verdict = "suspect"
             else: verdict = "safe"
-            reason = "Analyse IA sur domaine non répertorié."
+            reason = "Analyse IA : domaine non répertorié."
 
         return jsonify({
-            "verdict": verdict,
-            "score": score,
-            "ml_score": ml_score,
-            "analyzed_host": domain,
-            "rank": rank,
-            "reason_text": reason,
+            "verdict": verdict, "score": final_score, "ml_score": ml_score,
+            "analyzed_host": domain, "rank": rank, "reason_text": reason,
             "reasons": [{"text": reason, "severity": "info" if verdict=="safe" else "warning", "points": 0}]
         })
 
