@@ -10,8 +10,11 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Optional
 
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+
 logger    = logging.getLogger("linkcheck.screenshot")
-_POOL     = ThreadPoolExecutor(max_workers=1, thread_name_prefix="screenshot")
+_POOL     = ThreadPoolExecutor(max_workers=2, thread_name_prefix="screenshot")
 _SHOT_DIR = os.path.join("static", "screenshots")
 _RE_SAFE  = re.compile(r'[^a-zA-Z0-9\-]')
 
@@ -39,7 +42,8 @@ def _do_capture(url: str, path: str) -> Optional[str]:
     driver = None
     t0     = time.monotonic()
     try:
-        driver = webdriver.Chrome(options=opts)
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=opts)
         driver.set_page_load_timeout(15)
         driver.get(url)
         time.sleep(2)

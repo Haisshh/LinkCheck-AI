@@ -7,10 +7,12 @@ import logging
 from typing import Optional
 from urllib.parse import urlparse
 
-import requests
-import urllib3
 import joblib
 import pandas as pd
+import requests
+import urllib3
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 
 from features import extract_features, FEATURE_NAMES, SUSPICIOUS_WORDS, SHORTENERS
 from screenshot import take_screenshot_async
@@ -60,21 +62,52 @@ _FETCH_HEADERS = {
 }
 _MAX_HTML_BYTES = 2_000_000  # 2 Mo
 
+_RETRY_STRATEGY = Retry(
+    total=2,
+    backoff_factor=0.3,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=frozenset(["GET"]),
+)
+_SESSION: Optional[requests.Session] = None
+
+
+def _create_session() -> requests.Session:
+    session = requests.Session()
+    adapter = HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=_RETRY_STRATEGY)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    session.headers.update(_FETCH_HEADERS)
+    return session
+
+
+def _get_session() -> requests.Session:
+    global _SESSION
+    if _SESSION is None:
+        _SESSION = _create_session()
+    return _SESSION
+
+
 # ── Récupération HTML ─────────────────────────────────────────────────────────
 
 def _fetch_html(url: str) -> Optional[str]:
     """Retourne le HTML de l'URL ou None. Logs détaillés par type d'erreur."""
     try:
         t0 = time.monotonic()
-        r  = requests.get(url, timeout=5, verify=False, headers=_FETCH_HEADERS,
-                          allow_redirects=True, stream=True)
+        session = _get_session()
+        r = session.get(url, timeout=5, verify=False, allow_redirects=True, stream=True)
         elapsed = round((time.monotonic() - t0) * 1000)
+
+        if r.status_code != 200:
+            logger.warning("[analyzer] HTTP %s pour %s", r.status_code, url)
+            return None
 
         if "text/html" not in r.headers.get("Content-Type", "").lower():
             logger.warning("[analyzer] Contenu non-HTML ignoré pour %s", url)
             return None
 
-        html = r.content[:_MAX_HTML_BYTES].decode("utf-8", errors="replace")
+        r.raw.decode_content = True
+        html_bytes = r.raw.read(_MAX_HTML_BYTES)
+        html = html_bytes.decode("utf-8", errors="replace")
         logger.info("[analyzer] HTML OK en %dms (%d o)", elapsed, len(html))
         return html
 

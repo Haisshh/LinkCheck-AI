@@ -9,8 +9,9 @@ import logging
 
 import joblib
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import accuracy_score, classification_report
+from sklearn.model_selection import StratifiedKFold, cross_validate
 
 logging.basicConfig(
     level=logging.INFO,

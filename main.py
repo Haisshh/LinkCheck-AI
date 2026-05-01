@@ -4,14 +4,12 @@
 
 import os
 import re
-import time
 import zipfile
 import logging
-from collections import defaultdict
-from urllib.parse import urlparse
 
 import pandas as pd
 from flask import Flask, jsonify, render_template, request, send_file
+from flask_limiter import Limiter
 
 from analyzer import analyze_url
 
@@ -27,6 +25,12 @@ logger = logging.getLogger("linkcheck.main")
 # ── App Flask ─────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
+
+def _rate_key() -> str:
+    fwd = request.headers.get("X-Forwarded-For", "")
+    return fwd.split(",")[0].strip() if fwd else (request.remote_addr or "unknown")
+
+limiter = Limiter(app, key_func=_rate_key, default_limits=["30 per minute"])
 
 # ── Tranco ────────────────────────────────────────────────────────────────────
 
@@ -50,26 +54,6 @@ def _load_tranco() -> None:
 
 _load_tranco()
 
-# ── Rate limiting (in-memory, par IP) ─────────────────────────────────────────
-
-_RATE: dict[str, list[float]] = defaultdict(list)
-_LIMIT, _WINDOW = 30, 60  # 30 req / 60 s
-
-
-def _rate_ok(ip: str) -> bool:
-    now    = time.monotonic()
-    cutoff = now - _WINDOW
-    bucket = _RATE[ip] = [t for t in _RATE[ip] if t > cutoff]
-    if len(bucket) >= _LIMIT:
-        logger.warning("[rate] %s bloquée (%d req)", ip, len(bucket))
-        return False
-    bucket.append(now)
-    return True
-
-
-def _client_ip() -> str:
-    fwd = request.headers.get("X-Forwarded-For", "")
-    return fwd.split(",")[0].strip() if fwd else (request.remote_addr or "unknown")
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -81,9 +65,7 @@ def index():
 
 @app.post("/analyze")
 def analyze():
-    ip = _client_ip()
-    if not _rate_ok(ip):
-        return jsonify({"error": "Trop de requêtes — limite : 30/min"}), 429
+    ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() if request.headers.get("X-Forwarded-For") else (request.remote_addr or "unknown")
 
     body = request.get_json(silent=True) or {}
     url  = str(body.get("url", "")).strip()
@@ -138,5 +120,5 @@ def _500(e):
 # ── Lancement ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    logger.info("[main] Démarrage — %d req/%ds", _LIMIT, _WINDOW)
-    app.run(debug=True, threaded=True)
+    logger.info("[main] Démarrage — limite 30 req/min")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true", threaded=True)

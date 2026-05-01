@@ -4,6 +4,7 @@
 
 import re
 import math
+from collections import Counter
 from urllib.parse import urlparse
 from functools import lru_cache
 from typing import Optional
@@ -115,24 +116,24 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
     fd_len   = len(path.split("/")[1]) if len(path.split("/")) > 1 else 0
 
     # ── Comptage de caractères (un seul passage sur full) ─────────
-    counts = {c: full.count(c) for c in ".-()?&|=_~%/*:,;$@ "}
-    nb_dots      = counts["."]
-    nb_hyphens   = counts["-"]
-    nb_at        = counts["@"]
-    nb_qm        = counts["?"]
-    nb_and       = counts["&"]
-    nb_or        = counts["|"]
-    nb_eq        = counts["="]
-    nb_underscore= counts["_"]
-    nb_tilde     = counts["~"]
-    nb_percent   = counts["%"]
-    nb_slash     = counts["/"]
-    nb_star      = counts["*"]
-    nb_colon     = counts[":"]
-    nb_comma     = counts[","]
-    nb_semicolumn= counts[";"]
-    nb_dollar    = counts["$"]
-    nb_space     = counts[" "] + full.count("%20")
+    counter = Counter(full)
+    nb_dots      = counter["."]
+    nb_hyphens   = counter["-"]
+    nb_at        = counter["@"]
+    nb_qm        = counter["?"]
+    nb_and       = counter["&"]
+    nb_or        = counter["|"]
+    nb_eq        = counter["="]
+    nb_underscore= counter["_"]
+    nb_tilde     = counter["~"]
+    nb_percent   = counter["%"]
+    nb_slash     = counter["/"]
+    nb_star      = counter["*"]
+    nb_colon     = counter[":"]
+    nb_comma     = counter[","]
+    nb_semicolumn= counter[";"]
+    nb_dollar    = counter["$"]
+    nb_space     = counter[" "] + full.count("%20")
 
     nb_www    = int("www." in hostname)
     nb_com    = full.count(".com")
