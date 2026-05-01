@@ -12,3 +12,4 @@ data/memoire_ia.csv
 __pycache__/
 *.pyc
 
+screenshot.py

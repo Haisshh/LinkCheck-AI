@@ -53,6 +53,3 @@ def ratelimit_handler(e):
     return jsonify({
         "error": "Du calme ! Vous envoyez trop de requêtes. Attendez une minute."
     }), 429
-
-if __name__ == "__main__":
-    app.run(debug=True)
