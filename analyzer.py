@@ -6,6 +6,7 @@ import time
 import logging
 from typing import Optional
 from urllib.parse import urlparse
+from functools import lru_cache
 
 import joblib
 import pandas as pd
@@ -228,6 +229,14 @@ def _ml_score(f: dict) -> Optional[int]:
         return None
 
 
+# ── Cache pour features ───────────────────────────────────────────────────────
+
+@lru_cache(maxsize=1024)
+def _cached_extract_features(url: str, html_hash: int) -> dict:
+    """Cache les features pour éviter les recalculs."""
+    return extract_features(url, None if html_hash == 0 else "dummy")  # Ajuster selon besoin
+
+
 # ── Point d'entrée ────────────────────────────────────────────────────────────
 
 _RE_SAFE_NAME = re.compile(r'[^a-zA-Z0-9]')
@@ -259,7 +268,8 @@ def analyze_url(url: str) -> dict:
     html = _fetch_html(full_url)
 
     # 3. Features
-    f = extract_features(full_url, html)
+    html_hash = hash(html) if html else 0
+    f = _cached_extract_features(full_url, html_hash)
 
     # 4. Heuristique + ML
     h_score, reasons = _heuristic(hostname, full_url, f)

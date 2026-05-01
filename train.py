@@ -11,7 +11,8 @@ import joblib
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import accuracy_score, classification_report
-from sklearn.model_selection import StratifiedKFold, cross_validate
+from sklearn.model_selection import cross_validate
+from sklearn.utils.class_weight import compute_sample_weight
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,16 +66,34 @@ def _prepare(train: pd.DataFrame, test: pd.DataFrame):
 
 
 def _train_and_save(X_train, y_train, X_test, y_test, feat_names: list) -> None:
-    logger.info("Entraînement RandomForest…")
-    t0    = time.monotonic()
-    model = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=20,
+    logger.info("Entraînement HistGradientBoostingClassifier…")
+    t0 = time.monotonic()
+
+    sample_weight = compute_sample_weight("balanced", y_train)
+    model = HistGradientBoostingClassifier(
+        max_iter=200,
+        learning_rate=0.1,
+        max_leaf_nodes=31,
         random_state=42,
-        n_jobs=-1,
-        class_weight="balanced",
+        early_stopping=True,
+        scoring="accuracy",
+        validation_fraction=0.1,
     )
-    model.fit(X_train, y_train)
+
+    cv_results = cross_validate(
+        model,
+        X_train,
+        y_train,
+        cv=5,
+        scoring="accuracy",
+        n_jobs=-1,
+        return_train_score=False,
+    )
+    logger.info("CV accuracy : %.2f%% (+/- %.2f)",
+                cv_results["test_score"].mean() * 100,
+                cv_results["test_score"].std() * 100)
+
+    model.fit(X_train, y_train, sample_weight=sample_weight)
     logger.info("Terminé en %.1fs", time.monotonic() - t0)
 
     y_pred = model.predict(X_test)
@@ -87,7 +106,7 @@ def _train_and_save(X_train, y_train, X_test, y_test, feat_names: list) -> None:
     for name, imp in top10:
         logger.info("  %-38s %.4f", name, imp)
 
-    joblib.dump(model,      MODEL_OUT)
+    joblib.dump(model, MODEL_OUT)
     joblib.dump(feat_names, FEAT_OUT)
     logger.info("Sauvegardé : %s, %s — lancez `python run.py`", MODEL_OUT, FEAT_OUT)
 

@@ -11,5 +11,18 @@ data/memoire_ia.csv
 # Ne pas envoyer les fichiers temporaires Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-screenshot.py
+# Modèles entraînés (générés)
+
+
+# Logs
+*.log
+
+# Screenshots temporaires
+static/screenshots/
+
+# IDE
+.vscode/
+.idea/
