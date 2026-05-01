@@ -6,6 +6,7 @@ gunicorn
 pandas
 scikit-learn==1.8.0
 numpy
+selenium
 
 # Scraping et Collecte de données
 requests
