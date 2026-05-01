@@ -1,20 +1,18 @@
 # Serveur Web et Framework
 flask
+Flask-Limiter
 gunicorn
-webdriver-manager
-zipfile36
 
 # Analyse de données et Machine Learning
 pandas
-scikit-learn==1.8.0
 numpy
-selenium
+scikit-learn==1.8.0
+joblib
 
 # Scraping et Collecte de données
 requests
-beautifulsoup4
 urllib3
 
-# Sécurité et Utilitaires
-flask-limiter
-python-dotenv
+# Navigateurs / capture d'écran
+selenium
+webdriver-manager
