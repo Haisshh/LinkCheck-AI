@@ -1,0 +1,17 @@
+# Serveur Web et Framework
+flask
+gunicorn
+
+# Analyse de données et Machine Learning
+pandas
+scikit-learn==1.8.0
+numpy
+
+# Scraping et Collecte de données
+requests
+beautifulsoup4
+urllib3
+
+# Sécurité et Utilitaires
+flask-limiter
+python-dotenv

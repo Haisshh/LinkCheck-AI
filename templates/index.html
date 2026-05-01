@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LinkCheck — Analyse de liens</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+<div class="layout">
+
+  <!-- BARRE DE NAVIGATION -->
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-icon" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x=".5" y=".5" width="27" height="27" rx="5.5" stroke="currentColor" stroke-opacity=".25"/>
+        <circle cx="14" cy="14" r="5" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M14 9v2M14 17v2M9 14H7M21 14h-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="14" cy="14" r="1.5" fill="currentColor"/>
+      </svg>
+      <span class="brand-name">LinkCheck</span>
+      <span class="brand-version">v1.1</span>
+    </div>
+    <div class="status-badge">
+      <span class="status-dot" aria-hidden="true"></span>
+      Moteur actif
+    </div>
+  </header>
+
+  <!-- CONTENU PRINCIPAL -->
+  <main class="main">
+
+    <!-- Formulaire -->
+    <section class="input-section">
+      <p class="field-label">URL à analyser</p>
+      <div class="input-row">
+        <input
+          type="text"
+          id="urlInput"
+          class="url-input"
+          placeholder="https://exemple.com/page?action=login"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="URL à analyser"
+        />
+        <button id="analyzeBtn" class="btn-scan" onclick="runAnalysis()">Analyser</button>
+      </div>
+      <div class="presets">
+        <span class="presets-label">Scénarios de test :</span>
+        <button class="preset-chip" onclick="setUrl('https://google.com')">google.com</button>
+        <button class="preset-chip" onclick="setUrl('http://amaz0n-secure.login.account-verify.com/update?urgent=true')">amaz0n phishing</button>
+        <button class="preset-chip" onclick="setUrl('http://bit.ly/3xKp2aB')">raccourcisseur</button>
+        <button class="preset-chip" onclick="setUrl('https://paypa1.secure-account-login-verify.com/update')">paypal usurpation</button>
+        <button class="preset-chip" onclick="setUrl('https://secure.login.bank.fake-support.com/verify-account')">multi-sous-domaines</button>
+      </div>
+    </section>
+
+    <!-- Résultat (injecté par JS) -->
+    <section id="resultSection" aria-live="polite"></section>
+
+    <!-- Historique (injecté par JS) -->
+    <section id="historySection"></section>
+
+  </main>
+
+  <!-- PIED DE PAGE -->
+  <footer class="footer">
+    <span>LinkCheck — Outil pédagogique de cybersécurité.</span>
+    <span>Ne remplace pas une solution de sécurité professionnelle.</span>
+  </footer>
+
+</div>
+
+<script>
+  // ── État global ────────────────────────────────────────────────
+  let sessionHistory = [];
+  let lastResult = null;
+
+  // ── Sécurité : échapper le HTML pour éviter les injections XSS ─
+  // Si une URL malveillante contient du HTML, cette fonction l'échappe
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, m => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+    }[m]));
+  }
+
+  // ── Remplir le champ et lancer l'analyse ──────────────────────
+  function setUrl(url) {
+    document.getElementById('urlInput').value = url;
+    runAnalysis();
+  }
+
+  function currentTime() {
+    return new Date().toLocaleTimeString('fr-FR', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+  }
+
+  // ── Analyse principale ─────────────────────────────────────────
+  async function runAnalysis() {
+    const input = document.getElementById('urlInput').value.trim();
+    if (!input) return;
+
+    const btn = document.getElementById('analyzeBtn');
+    btn.textContent = 'Analyse…';
+    btn.disabled = true;
+
+    try {
+      const res = await fetch('/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: input })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Erreur serveur ' + res.status);
+      }
+
+      // CORRECTION : Flask retourne l'objet directement,
+      // pas enveloppé dans { data: ... }
+      const data = await res.json();
+
+      lastResult = { ...data, inputUrl: input };
+      renderResult(data, input);
+
+      sessionHistory.unshift({ url: input, ...data });
+      if (sessionHistory.length > 8) sessionHistory.pop();
+      renderHistory();
+
+    } catch (err) {
+      document.getElementById('resultSection').innerHTML =
+        `<div class="error-banner">Erreur : ${escapeHtml(err.message)}</div>`;
+    } finally {
+      btn.textContent = 'Analyser';
+      btn.disabled = false;
+    }
+  }
+
+  // ── Rendu du résultat ─────────────────────────────────────────
+  // ── Rendu du résultat ─────────────────────────────────────────
+  function renderResult(data, rawUrl) {
+    const verdictLabels = {
+      safe:      'Aucune menace détectée',
+      suspect:   'Indicateurs suspects',
+      dangerous: 'Lien à haut risque',
+      error:     'URL invalide'
+    };
+    const sevMap = {
+      danger: 'HIGH',
+      warn:   'MED',
+      info:   'LOW',
+      safe:   'INFO'
+    };
+
+    const findingsHtml = (data.reasons || []).map(r => `
+      <div class="finding">
+        <span class="finding-sev sev-${escapeHtml(sevMap[r.severity] || 'INFO')}">${escapeHtml(sevMap[r.severity] || 'INFO')}</span>
+        <span class="finding-text">${escapeHtml(r.text)}</span>
+        <span class="finding-pts">${r.points > 0 ? '+' + r.points : ''}</span>
+      </div>`).join('');
+
+    // --- NOUVEAU : Bloc Capture d'écran ---
+    let screenshotHtml = '';
+    if (data.screenshot) {
+      screenshotHtml = `
+        <div class="screenshot-area">
+          <div class="field-label" style="margin-bottom:12px">Aperçu visuel (Sandbox)</div>
+          <div class="screenshot-frame">
+            <img src="/${data.screenshot}" alt="Capture d'écran du site" class="screenshot-img">
+          </div>
+        </div>
+      `;
+    }
+
+    const mlHtml = data.ml_score !== undefined
+      ? `<span class="result-time" style="margin-right:auto">Score ML : ${data.ml_score}/100</span>`
+      : '';
+
+    document.getElementById('resultSection').innerHTML = `
+      <div class="result-card verdict-${escapeHtml(data.verdict)}">
+
+        <div class="result-head">
+          <div class="result-meta">
+            <div class="result-host">${escapeHtml(data.analyzed_host || rawUrl)}</div>
+            <div class="result-verdict-row">
+              <span class="verdict-dot"></span>
+              <span class="verdict-text">${escapeHtml(verdictLabels[data.verdict] || 'Inconnu')}</span>
+            </div>
+          </div>
+          <div class="score-block">
+            <span class="score-number">${escapeHtml(String(data.score))}</span>
+            <span class="score-denom">/ 100</span>
+          </div>
+        </div>
+
+        <div class="bar-wrap">
+          <div class="bar-track"><div class="bar-fill" id="scoreBar"></div></div>
+          <div class="bar-ticks">
+            <span>0</span><span>Sûr ≤ 30</span><span>Suspect ≤ 60</span><span>100</span>
+          </div>
+        </div>
+
+        <div class="findings">
+          <div class="findings-header">
+            <span class="field-label" style="margin:0">Résultats de l'analyse</span>
+            <span class="findings-count">${(data.reasons || []).length} règle(s)</span>
+          </div>
+          <div class="findings-list">${findingsHtml}</div>
+        </div>
+
+        ${screenshotHtml}
+
+        <div class="result-footer">
+          <button class="btn-copy" onclick="copyResult()">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <rect x=".5" y="3.5" width="8" height="8" rx="1.5" stroke="currentColor"/>
+              <path d="M3.5 3V2.5A1.5 1.5 0 0 1 5 1h4.5A1.5 1.5 0 0 1 11 2.5V7A1.5 1.5 0 0 1 9.5 8.5H9" stroke="currentColor" stroke-linecap="round"/>
+            </svg>
+            Copier le rapport
+          </button>
+          ${mlHtml}
+          <span class="result-time">${currentTime()}</span>
+        </div>
+
+      </div>`;
+
+    setTimeout(() => {
+      const bar = document.getElementById('scoreBar');
+      if (bar) bar.style.width = data.score + '%';
+    }, 60);
+  }
+
+  // ── Copier le rapport ─────────────────────────────────────────
+  function copyResult() {
+    if (!lastResult) return;
+    const vMap = { safe: 'SÛRE', suspect: 'SUSPECTE', dangerous: 'DANGEREUSE' };
+    const lines = [
+      'LINKCHECK — RAPPORT D\'ANALYSE',
+      '─'.repeat(40),
+      `URL      : ${lastResult.inputUrl}`,
+      `Score    : ${lastResult.score}/100`,
+      `Verdict  : ${vMap[lastResult.verdict] || lastResult.verdict.toUpperCase()}`,
+      `Date     : ${new Date().toLocaleString('fr-FR')}`,
+      '',
+      'DÉTAIL DES RÈGLES :',
+      ...(lastResult.reasons || []).map(r =>
+        `  · ${r.text}${r.points > 0 ? ' (+' + r.points + ' pts)' : ''}`)
+    ];
+    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+      const btn = document.querySelector('.btn-copy');
+      if (btn) {
+        btn.textContent = 'Copié';
+        setTimeout(() => btn.textContent = 'Copier le rapport', 1800);
+      }
+    });
+  }
+
+  // ── Historique de session ─────────────────────────────────────
+  function renderHistory() {
+    const section = document.getElementById('historySection');
+    if (!sessionHistory.length) { section.innerHTML = ''; return; }
+
+    const lMap = { safe: 'Sûre', suspect: 'Suspecte', dangerous: 'Dangereuse' };
+    section.innerHTML = `
+      <div class="history-wrap">
+        <p class="field-label">Historique de session</p>
+        <div class="history-list">
+          ${sessionHistory.map(h => `
+            <div class="history-row" onclick="setUrl('${escapeHtml(h.url)}')">
+              <span class="history-url">${escapeHtml(h.url)}</span>
+              <span class="history-badge badge-${escapeHtml(h.verdict)}">${lMap[h.verdict] || h.verdict}</span>
+              <span class="history-score">${h.score}/100</span>
+            </div>`).join('')}
+        </div>
+      </div>`;
+  }
+
+  // Touche Entrée = lancer l'analyse
+  document.getElementById('urlInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') runAnalysis();
+  });
+</script>
+</body>
+</html>

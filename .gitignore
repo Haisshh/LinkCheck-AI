@@ -1,0 +1,14 @@
+# Ne pas envoyer le dossier de l'environnement virtuel
+venv/
+.env
+
+# Ne pas envoyer les données brutes (trop lourd et privé)
+data/scraped_data.csv
+data/verified_online.csv
+data/tranco_GV97K-1m.csv.zip
+data/memoire_ia.csv
+
+# Ne pas envoyer les fichiers temporaires Python
+__pycache__/
+*.pyc
+
