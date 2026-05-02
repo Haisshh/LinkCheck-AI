@@ -9,6 +9,7 @@ import json
 import logging
 import requests
 from datetime import datetime
+from functools import lru_cache
 
 import pandas as pd
 from flask import Flask, abort, jsonify, render_template, request, send_file
@@ -16,6 +17,7 @@ from flask_limiter import Limiter
 
 
 def _load_dotenv(path: str = ".env") -> None:
+    """Load environment variables from .env file if it exists."""
     if not os.path.exists(path):
         return
     with open(path, "r", encoding="utf-8") as env_file:
@@ -34,7 +36,7 @@ _load_dotenv()
 
 from analyzer import analyze_url
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+# ── Logging ──────────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,17 +45,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger("linkcheck.main")
 
-# ── App Flask ─────────────────────────────────────────────────────────────────
+# ── App Flask ────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
 
 def _rate_key() -> str:
+    """
+    Extract client IP from request headers or connection.
+    Centralized function to avoid duplication.
+    
+    Returns:
+        IP address string for rate limiting key
+    """
     fwd = request.headers.get("X-Forwarded-For", "")
     return fwd.split(",")[0].strip() if fwd else (request.remote_addr or "unknown")
 
 limiter = Limiter(_rate_key, app=app, default_limits=["30 per minute"])
 
-# ── Tranco ────────────────────────────────────────────────────────────────────
+# ── Tranco ───────────────────────────────────────────────────────────────
 
 _TRANCO_PATH = "data/tranco_GV97K-1m.csv.zip"
 _REPUTATION: dict[str, int] = {}
@@ -63,6 +72,7 @@ FEEDBACK_ADMIN_TOKEN = os.environ.get("FEEDBACK_ADMIN_TOKEN")
 
 
 def _load_tranco() -> None:
+    """Load Tranco reputation database for domain reputation scoring."""
     global _REPUTATION
     if not os.path.exists(_TRANCO_PATH):
         logger.info("[main] Tranco missing — reputation scoring disabled")
@@ -76,7 +86,17 @@ def _load_tranco() -> None:
         logger.error("[main] Tranco load failed: %s", e)
 
 
+@lru_cache(maxsize=2048)
 def _tranco_score(rank: int | None) -> int:
+    """
+    Calculate trust score based on Tranco ranking with caching.
+    
+    Args:
+        rank: Tranco rank (1-800000) or None if not ranked
+    
+    Returns:
+        Trust score (0-100)
+    """
     if rank is None:
         return 40
     if rank <= 1000:
@@ -91,6 +111,16 @@ def _tranco_score(rank: int | None) -> int:
 
 
 def _combine_trust(result: dict) -> int:
+    """
+    Combine multiple trust signals into a single score.
+    
+    Weights:
+    - ML score: 40%
+    - Heuristic: 20%
+    - Tranco: 20%
+    - SSL: 10%
+    - DNS: 10%
+    """
     ml = result.get("ml_score")
     heuristic = result.get("heuristic_score")
     ssl = result.get("ssl_info", {}).get("trust_score")
@@ -116,20 +146,31 @@ def _combine_trust(result: dict) -> int:
 _load_tranco()
 
 
-
-# ── Routes ────────────────────────────────────────────────────────────────────
+# ── Routes ───────────────────────────────────────────────────────────────
 
 @app.get("/")
 def index():
+    """Serve the main UI."""
     return render_template("index.html")
 
 
 @app.post("/analyze")
+@limiter.limit("30 per minute")
 def analyze():
-    ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() if request.headers.get("X-Forwarded-For") else (request.remote_addr or "unknown")
-
+    """
+    Analyze a URL for phishing/fraud indicators.
+    
+    Request body:
+    {
+        "url": "https://example.com"
+    }
+    
+    Returns:
+        JSON with analysis results (score, verdict, reasons, etc.)
+    """
+    ip = _rate_key()
     body = request.get_json(silent=True) or {}
-    url  = str(body.get("url", "")).strip()
+    url = str(body.get("url", "")).strip()
 
     if not url:
         return jsonify({"error": "Empty URL"}), 400
@@ -141,7 +182,7 @@ def analyze():
 
     # Enrichissement Tranco (IA + Réputation)
     domain = result.get("analyzed_host", "")
-    rank   = _REPUTATION.get(domain) or _REPUTATION.get(".".join(domain.split(".")[-2:]))
+    rank = _REPUTATION.get(domain) or _REPUTATION.get(".".join(domain.split(".")[-2:]))
 
     if rank:
         result["tranco_rank"] = rank
@@ -186,6 +227,7 @@ def analyze():
 
 
 def _send_feedback_to_discord(payload: dict) -> tuple[bool, str]:
+    """Send feedback payload to Discord webhook."""
     if not DISCORD_FEEDBACK_WEBHOOK:
         return False, "Discord webhook not configured"
     try:
@@ -198,6 +240,7 @@ def _send_feedback_to_discord(payload: dict) -> tuple[bool, str]:
 
 
 def _store_feedback_record(record: dict) -> None:
+    """Store feedback record as JSONL."""
     storage_folder = os.path.dirname(FEEDBACK_STORAGE_PATH)
     if storage_folder:
         os.makedirs(storage_folder, exist_ok=True)
@@ -206,6 +249,7 @@ def _store_feedback_record(record: dict) -> None:
 
 
 def _authorize_admin() -> None:
+    """Verify admin token from Authorization header or query param."""
     if not FEEDBACK_ADMIN_TOKEN:
         abort(403, description="Feedback admin token not configured")
     auth_header = request.headers.get("Authorization", "")
@@ -219,6 +263,7 @@ def _authorize_admin() -> None:
 
 
 def _load_feedback_records(limit: int | None = None) -> list[dict]:
+    """Load feedback records from JSONL file."""
     if not os.path.exists(FEEDBACK_STORAGE_PATH):
         return []
     records = []
@@ -237,13 +282,17 @@ def _load_feedback_records(limit: int | None = None) -> list[dict]:
 
 
 @app.get("/admin/feedback")
+@limiter.limit("30 per minute")
 def admin_feedback():
+    """Serve admin feedback UI."""
     _authorize_admin()
     return render_template("admin_feedback.html")
 
 
 @app.get("/admin/feedback/json")
+@limiter.limit("30 per minute")
 def admin_feedback_json():
+    """Get feedback records as JSON."""
     _authorize_admin()
     limit = request.args.get("limit")
     try:
@@ -254,15 +303,24 @@ def admin_feedback_json():
 
 
 @app.get("/admin/feedback/download")
+@limiter.limit("10 per minute")
 def admin_feedback_download():
+    """Download feedback file."""
     _authorize_admin()
     if not os.path.exists(FEEDBACK_STORAGE_PATH):
         return jsonify({"error": "No feedback file found"}), 404
-    return send_file(FEEDBACK_STORAGE_PATH, mimetype="application/json", as_attachment=True, download_name=os.path.basename(FEEDBACK_STORAGE_PATH))
+    return send_file(
+        FEEDBACK_STORAGE_PATH,
+        mimetype="application/json",
+        as_attachment=True,
+        download_name=os.path.basename(FEEDBACK_STORAGE_PATH)
+    )
 
 
 @app.post("/feedback")
+@limiter.limit("10 per minute")
 def feedback():
+    """Accept and store user feedback on analysis results."""
     body = request.get_json(silent=True) or {}
     url = str(body.get("url", "")).strip()
     if not url:
@@ -319,8 +377,13 @@ def feedback():
 _RE_SAFE = re.compile(r'[^a-zA-Z0-9_]')
 
 @app.get("/screenshot/<path:hostname>")
+@limiter.limit("60 per minute")
 def screenshot(hostname: str):
-    """Polling : retourne l'image si prête, 202 sinon."""
+    """
+    Poll for screenshot. Returns 202 if not ready, or PNG if available.
+    
+    Endpoint for checking if a screenshot was generated for a URL analysis.
+    """
     safe = _RE_SAFE.sub("", hostname)[:40]
     path = os.path.join("static", "screenshots", f"{safe}.png")
     if os.path.exists(path):
@@ -339,8 +402,13 @@ def _500(e):
     return jsonify({"error": "Erreur serveur"}), 500
 
 
-# ── Lancement ─────────────────────────────────────────────────────────────────
+# ── Lancement ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    logger.info("[main] Starting — limit 30 req/min")
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true", threaded=True)
+    logger.info("[main] Starting — limit 30 req/min (analyze endpoint)")
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+        debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true",
+        threaded=True
+    )
