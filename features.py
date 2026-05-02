@@ -1,6 +1,6 @@
 # features.py
-# Extraction de features purement textuelles + HTML optionnel.
-# Aucune requête réseau. Zéro dépendance externe.
+# Purely textual feature extraction + optional HTML support.
+# No network requests. Zero external dependencies.
 
 import re
 import math
@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from functools import lru_cache
 from typing import Optional
 
-# ── Références (sets pour O(1) au lieu de O(n)) ───────────────────────────────
+# ── References (sets for O(1) membership tests instead of O(n)) ──────────────────
 
 SUSPICIOUS_WORDS: frozenset[str] = frozenset({
     "login", "verify", "account", "secure", "update", "urgent", "password",
@@ -40,7 +40,7 @@ DANGEROUS_EXTENSIONS: frozenset[str] = frozenset({
     ".sh", ".bat", ".cmd", ".ps1", ".msi", ".dmg",
 })
 
-# ── Regex pré-compilées (compilées une fois au chargement du module) ───────────
+# ── Precompiled regex patterns (compiled once at module load) ────────────────
 
 _RE_NORMALIZE  = re.compile(r'^https?://', re.IGNORECASE)
 _RE_SPLIT_WORD = re.compile(r'[/\-_.?&=@+]')
@@ -54,12 +54,12 @@ _RE_EXT_IMG    = re.compile(r'<img[^>]+src=["\']https?://')
 # ── Utilitaires ───────────────────────────────────────────────────────────────
 
 def _safe_lower(s: Optional[str]) -> str:
-    """None-safe lowercase. Retourne '' si None ou non-str."""
+    """None-safe lowercase. Returns '' if None or not a string."""
     return s.lower() if isinstance(s, str) and s else ""
 
 
 def _entropy(s: str) -> float:
-    """Entropie de Shannon. Valeur haute = chaîne aléatoire."""
+    """Shannon entropy. Higher value indicates a more random string."""
     if not s:
         return 0.0
     freq = {}
@@ -78,13 +78,13 @@ def _word_stats(text: str) -> tuple[int, int, float]:
     return min(lengths), max(lengths), sum(lengths) / len(lengths)
 
 
-# ── Extraction principale ─────────────────────────────────────────────────────
+# ── Main extraction ─────────────────────────────────────────────────────────
 
 def extract_features(url: str, html_content: Optional[str] = None) -> dict:
     """
-    Retourne un dict de features numériques.
-    html_content est optionnel — None si le site était inaccessible.
-    Aucune requête réseau effectuée ici.
+    Return a dictionary of numeric features.
+    html_content is optional — None if the site was inaccessible.
+    No network requests are performed here.
     """
     # ── Normalisation ─────────────────────────────────────────────
     if not _RE_NORMALIZE.match(url):
@@ -96,7 +96,7 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
     query    = _safe_lower(parsed.query)
     full     = url.lower()
 
-    # Décomposition du domaine
+    # Domain decomposition
     parts           = hostname.split(".")
     tld             = parts[-1] if parts else ""
     domain          = parts[-2] if len(parts) >= 2 else hostname
@@ -104,7 +104,7 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
     subdomain       = ".".join(subdomain_parts)
     nb_subdomains   = len(subdomain_parts)
 
-    # HTML normalisé (jamais None)
+    # Normalized HTML content (never None)
     html     = _safe_lower(html_content)
     has_html = bool(html)
 
@@ -115,7 +115,7 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
     tld_len  = len(tld)
     fd_len   = len(path.split("/")[1]) if len(path.split("/")) > 1 else 0
 
-    # ── Comptage de caractères (un seul passage sur full) ─────────
+    # ── Character counting (single pass over full URL) ─────────
     counter = Counter(full)
     nb_dots      = counter["."]
     nb_hyphens   = counter["-"]
@@ -164,7 +164,7 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
 
     char_repeat = int(bool(_RE_REPEAT.search(full)))
 
-    # ── Mots suspects (un seul passage sur SUSPICIOUS_WORDS) ──────
+    # ── Suspicious words (single pass over SUSPICIOUS_WORDS) ─────
     phish_hints        = sum(1 for w in SUSPICIOUS_WORDS if w in full)
     statistical_report = int(phish_hints >= 3)
 
@@ -174,7 +174,7 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
     sh_path, lg_path, avg_path = _word_stats(path)
     len_words_raw = sum(len(w) for w in _RE_SPLIT_WORD.split(full) if w)
 
-    # ── Marques (un seul passage) ──────────────────────────────────
+    # ── Brands (single pass) ─────────────────────────────────────
     domain_in_brand = brand_in_subdomain = brand_in_path = has_brand = 0
     abnormal_subdomain = int(nb_subdomains >= 3)
 
@@ -191,7 +191,7 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
 
     suspicious_tld = int(tld in SUSPICIOUS_TLDS)
 
-    # ── Features HTML ──────────────────────────────────────────────
+    # ── HTML features ─────────────────────────────────────────────
     if has_html:
         nb_hyperlinks  = html.count("<a href=")
         nb_forms       = html.count("<form")
@@ -222,7 +222,7 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
         nb_ext_img     = len(_RE_EXT_IMG.findall(html))
         status_code    = 200
     else:
-        # Estimation URL-only quand HTML absent
+        # URL-only estimation when HTML is absent
         nb_hyperlinks  = min(50, url_len // 10)
         nb_forms       = int(phish_hints >= 2)
         nb_iframe      = int(nb_subdomains >= 2 or phish_hints >= 2)
@@ -246,7 +246,7 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
         nb_ext_img      = int(domain_in_brand or brand_in_subdomain)
         status_code     = -1
 
-    # ── Nouvelles features pour améliorer la détection ─────────────────
+    # ── New features to improve detection ──────────────────────────
     url_entropy = _entropy(full)
     domain_entropy = _entropy(domain)
     subdomain_entropy = _entropy(subdomain)
@@ -371,5 +371,5 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
     }
 
 
-# Généré automatiquement — toujours synchronisé avec le dict ci-dessus
+# Automatically generated — always synchronized with the dictionary above
 FEATURE_NAMES: list[str] = list(extract_features("https://example.com").keys())

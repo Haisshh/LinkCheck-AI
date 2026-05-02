@@ -6,7 +6,7 @@
 
 A cutting-edge machine learning-based phishing detection system that analyzes URLs and web pages in real-time to identify malicious attempts. Built with HistGradientBoosting classifier and advanced feature engineering for superior accuracy.
 
-## 🚀 Key Features
+## Key Features
 
 - **Real-time Analysis**: Instant URL and webpage evaluation
 - **Advanced ML Model**: HistGradientBoosting with 99+ features
@@ -16,7 +16,7 @@ A cutting-edge machine learning-based phishing detection system that analyzes UR
 - **RESTful API**: Easy integration with existing systems
 - **Data Pipeline**: Automated scraping, preprocessing, and model training
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
@@ -28,7 +28,7 @@ A cutting-edge machine learning-based phishing detection system that analyzes UR
 - [Contributing](#contributing)
 - [License](#license)
 
-## 🔧 Installation
+## Installation
 
 ### Prerequisites
 

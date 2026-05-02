@@ -1,7 +1,7 @@
 # screenshot.py
-# Capture d'écran asynchrone via Selenium Chrome headless.
-# Un seul worker → jamais plusieurs Chrome en parallèle.
-# Flask n'est jamais bloqué.
+# Asynchronous screenshot capture using Selenium Chrome headless.
+# Single worker - never multiple Chrome instances in parallel.
+# Flask is never blocked.
 
 import os
 import re
@@ -30,7 +30,7 @@ _CHROME_ARGS = (
 
 
 def _do_capture(url: str, path: str) -> Optional[str]:
-    """Tourne dans le thread secondaire. Jamais appelé depuis Flask directement."""
+    """Runs in the worker thread. Never called directly from Flask."""
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
     from selenium.common.exceptions import TimeoutException, WebDriverException
@@ -48,7 +48,7 @@ def _do_capture(url: str, path: str) -> Optional[str]:
         driver.get(url)
         time.sleep(2)
         driver.save_screenshot(path)
-        logger.info("[screenshot] OK %.1fs → %s", time.monotonic() - t0, path)
+        logger.info("[screenshot] OK %.1fs -> %s", time.monotonic() - t0, path)
         return path
 
     except TimeoutException:
@@ -56,15 +56,15 @@ def _do_capture(url: str, path: str) -> Optional[str]:
     except WebDriverException as e:
         first_line = str(e).split("\n")[0]
         if "ERR_NAME_NOT_RESOLVED" in first_line:
-            logger.warning("[screenshot] Domaine inexistant : %s", url)
+            logger.warning("[screenshot] Domain not found: %s", url)
         elif "ERR_CONNECTION_REFUSED" in first_line:
-            logger.warning("[screenshot] Connexion refusée : %s", url)
+            logger.warning("[screenshot] Connection refused: %s", url)
         elif "ERR_CONNECTION_TIMED_OUT" in first_line:
-            logger.warning("[screenshot] Connexion expirée : %s", url)
+            logger.warning("[screenshot] Connection timed out: %s", url)
         elif "session not created" in first_line.lower():
-            logger.error("[screenshot] Chrome introuvable — installez Chromium")
+            logger.error("[screenshot] Chrome not found - install Chromium")
         else:
-            logger.error("[screenshot] WebDriver : %s", first_line)
+            logger.error("[screenshot] WebDriver error: %s", first_line)
     except Exception as e:
         logger.error("[screenshot] %s : %s", type(e).__name__, e)
     finally:
@@ -78,9 +78,9 @@ def _do_capture(url: str, path: str) -> Optional[str]:
 
 def take_screenshot_async(url: str, filename: Optional[str] = None) -> Future:
     """
-    Planifie une capture dans le thread secondaire et retourne immédiatement.
-    Flask peut traiter d'autres requêtes pendant ce temps.
-    Le résultat est accessible via GET /screenshot/<hostname>.
+    Schedule a capture in the worker thread and return immediately.
+    Flask can handle other requests while this is running.
+    The result is available via GET /screenshot/<hostname>.
     """
     os.makedirs(_SHOT_DIR, exist_ok=True)
 
@@ -89,10 +89,10 @@ def take_screenshot_async(url: str, filename: Optional[str] = None) -> Future:
 
     filepath = os.path.join(_SHOT_DIR, f"{filename}.png")
 
-    # Cache : pas de Chrome si l'image existe déjà
+    # Cache: skip Chrome if the image already exists
     if os.path.exists(filepath):
         logger.debug("[screenshot] Cache hit : %s", filepath)
         return _POOL.submit(lambda: filepath)
 
-    logger.info("[screenshot] Planifié : %s", url)
+    logger.info("[screenshot] Scheduled: %s", url)
     return _POOL.submit(_do_capture, url, filepath)

@@ -1,6 +1,6 @@
 # main.py
-# Serveur Flask LinkCheck — point d'entrée HTTP.
-# Toute la logique d'analyse est dans analyzer.py.
+# LinkCheck Flask server — HTTP entry point.
+# All analysis logic is in analyzer.py.
 
 import os
 import re
@@ -61,15 +61,15 @@ DISCORD_FEEDBACK_WEBHOOK = os.environ.get("DISCORD_FEEDBACK_WEBHOOK")
 def _load_tranco() -> None:
     global _REPUTATION
     if not os.path.exists(_TRANCO_PATH):
-        logger.info("[main] Tranco absent — réputation désactivée")
+        logger.info("[main] Tranco missing — reputation scoring disabled")
         return
     try:
         with zipfile.ZipFile(_TRANCO_PATH) as z, z.open(z.namelist()[0]) as f:
             df = pd.read_csv(f, header=None, names=["rank", "domain"], nrows=800_000)
             _REPUTATION = dict(zip(df["domain"], df["rank"]))
-        logger.info("[main] Tranco chargé : %d domaines", len(_REPUTATION))
+        logger.info("[main] Tranco loaded: %d domains", len(_REPUTATION))
     except Exception as e:
-        logger.error("[main] Tranco KO : %s", e)
+        logger.error("[main] Tranco load failed: %s", e)
 
 
 def _tranco_score(rank: int | None) -> int:
@@ -128,9 +128,9 @@ def analyze():
     url  = str(body.get("url", "")).strip()
 
     if not url:
-        return jsonify({"error": "URL vide"}), 400
+        return jsonify({"error": "Empty URL"}), 400
     if len(url) > 2000:
-        return jsonify({"error": "URL trop longue (max 2000 car.)"}), 400
+        return jsonify({"error": "URL too long (max 2000 chars)"}), 400
 
     logger.info("[main] %s → %s", ip, url[:80])
     result = analyze_url(url)
@@ -146,30 +146,30 @@ def analyze():
             result["verdict"] = "safe" if result["score"] <= 40 else result["verdict"]
             result["is_phishing"] = result["verdict"] != "safe"
             result["reasons"].insert(0, {
-                "text": f"Site très populaire (Tranco #{rank}) - confiance renforcée",
+                "text": f"Highly popular site (Tranco #{rank}) - trust boosted",
                 "points": -25, "severity": "safe",
             })
         elif rank <= 10_000:
             result["score"] = max(0, round(result["score"] * 0.8))
             result["reasons"].insert(0, {
-                "text": f"Site populaire (Tranco #{rank}) - ajustement de confiance",
+                "text": f"Popular site (Tranco #{rank}) - trust adjusted",
                 "points": -20, "severity": "safe",
             })
         elif rank <= 100_000:
             result["score"] = max(0, round(result["score"] * 0.9))
             result["reasons"].insert(0, {
-                "text": f"Site connu (Tranco #{rank})",
+                "text": f"Known site (Tranco #{rank})",
                 "points": -10, "severity": "info",
             })
         elif rank <= 800_000:
             result["score"] = max(0, round(result["score"] * 0.95))
             result["reasons"].insert(0, {
-                "text": f"Domaine populaire (Tranco #{rank}) - confiance modérée",
+                "text": f"Popular domain (Tranco #{rank}) - moderate trust",
                 "points": -5, "severity": "info",
             })
         else:
             result["reasons"].append({
-                "text": f"Rang Tranco élevé (#{rank}) - pas de réputation forte",
+                "text": f"High Tranco rank (#{rank}) - weak reputation",
                 "points": 0, "severity": "info",
             })
         result["tranco_score"] = _tranco_score(rank)
@@ -183,7 +183,7 @@ def analyze():
 
 def _send_feedback_to_discord(payload: dict) -> tuple[bool, str]:
     if not DISCORD_FEEDBACK_WEBHOOK:
-        return False, "Webhook Discord non configuré"
+        return False, "Discord webhook not configured"
     try:
         resp = requests.post(DISCORD_FEEDBACK_WEBHOOK, json=payload, timeout=5)
         if not resp.ok:
@@ -203,17 +203,17 @@ def feedback():
     analyzed_host = str(body.get("analyzed_host", "")).strip()
     verdict = str(body.get("verdict", "")).strip()
     score = body.get("score")
-    comment = str(body.get("comment", "")).strip() or "Aucun commentaire fourni"
+    comment = str(body.get("comment", "")).strip() or "No comment provided"
 
     embed = {
         "username": "LinkCheck Feedback",
         "embeds": [
             {
-                "title": "Nouveau signalement de faux positif",
-                "description": f"**URL**: {url}\n**Hôte analysé**: {analyzed_host or 'N/A'}\n**Score**: {score}/100\n**Verdict**: {verdict}",
+                "title": "New false positive report",
+                "description": f"**URL**: {url}\n**Analyzed host**: {analyzed_host or 'N/A'}\n**Score**: {score}/100\n**Verdict**: {verdict}",
                 "color": 15329363,
                 "fields": [
-                    {"name": "Commentaire", "value": comment[:1024]},
+                    {"name": "Comment", "value": comment[:1024]},
                 ],
                 "footer": {"text": "LinkCheck UI feedback"},
             }
@@ -222,10 +222,10 @@ def feedback():
 
     sent, error = _send_feedback_to_discord(embed)
     if not sent:
-        logger.warning("[main] Feedback Discord KO : %s", error)
-        return jsonify({"error": "Impossible d'envoyer le feedback", "detail": error}), 502
+        logger.warning("[main] Discord feedback failed: %s", error)
+        return jsonify({"error": "Unable to send feedback", "detail": error}), 502
 
-    return jsonify({"status": "ok", "message": "Feedback envoyé"}), 200
+    return jsonify({"status": "ok", "message": "Feedback sent"}), 200
 
 
 _RE_SAFE = re.compile(r'[^a-zA-Z0-9_]')
@@ -242,7 +242,7 @@ def screenshot(hostname: str):
 
 @app.errorhandler(404)
 def _404(e):
-    return jsonify({"error": "Introuvable"}), 404
+    return jsonify({"error": "Not found"}), 404
 
 
 @app.errorhandler(500)
@@ -254,5 +254,5 @@ def _500(e):
 # ── Lancement ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    logger.info("[main] Démarrage — limite 30 req/min")
+    logger.info("[main] Starting — limit 30 req/min")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true", threaded=True)
