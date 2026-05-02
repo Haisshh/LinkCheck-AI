@@ -24,7 +24,7 @@ from screenshot import take_screenshot_async
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger("linkcheck.analyzer")
 
-# ── ML Model ─────────────────────────────────────────────────────────────────
+# ── ML Model ─────────────────────────────────────────────────────────────
 
 _model: Optional[object]    = None
 _feat_names: Optional[list] = None
@@ -40,31 +40,32 @@ except Exception as e:
 
 ML_AVAILABLE = _model is not None and _feat_names is not None
 
-# ── Constantes ────────────────────────────────────────────────────────────────
+# ── Constantes ───────────────────────────────────────────────────────────
 
+# Whitelist: root domains only (hierarchical matching enabled)
+# Subdomains automatically covered: e.g., xbox.com → support.xbox.com, mail.xbox.com, etc.
 TRUSTED_DOMAINS: frozenset[str] = frozenset({
-    "google.com", "google.fr", "paypal.com", "paypal.fr",
-    "apple.com", "microsoft.com", "github.com", "netflix.com",
-    "wikipedia.org", "youtube.com", "stackoverflow.com",
+    "google.com", "paypal.com", "apple.com", "microsoft.com", "github.com",
+    "netflix.com", "wikipedia.org", "youtube.com", "stackoverflow.com",
     "amazon.com", "facebook.com", "twitter.com", "linkedin.com",
     "reddit.com", "instagram.com", "whatsapp.com", "zoom.us",
     "slack.com", "discord.com", "dropbox.com", "adobe.com",
     "bankofamerica.com", "wellsfargo.com", "chase.com",
     "dhl.com", "fedex.com", "ups.com", "usps.com",
     "mozilla.org", "apache.org", "linux.org", "ubuntu.com",
-    "debian.org", "centos.org", "redhat.com",
+    "debian.org", "centos.org", "redhat.com", "xbox.com",
 })
 
-# Homoglyphes connus pour chaque marque
-BRAND_FAKES: dict[str, tuple[str, ...]] = {
-    "amazon":    ("amaz0n", "amazoon"),
-    "google":    ("g00gle", "googIe"),
-    "paypal":    ("paypa1", "paypai", "pay-pal"),
-    "apple":     ("app1e", "appl3"),
-    "microsoft": ("micr0soft", "micros0ft"),
-    "facebook":  ("faceb00k",),
-    "netflix":   ("netfl1x",),
-    "ebay":      ("ebay1",),
+# Homoglyphes connus pour chaque marque - use frozenset for O(1) lookup
+BRAND_FAKES: dict[str, frozenset[str]] = {
+    "amazon":    frozenset(("amaz0n", "amazoon")),
+    "google":    frozenset(("g00gle", "googIe")),
+    "paypal":    frozenset(("paypa1", "paypai", "pay-pal")),
+    "apple":     frozenset(("app1e", "appl3")),
+    "microsoft": frozenset(("micr0soft", "micros0ft")),
+    "facebook":  frozenset(("faceb00k",)),
+    "netflix":   frozenset(("netfl1x",)),
+    "ebay":      frozenset(("ebay1",)),
 }
 
 _FETCH_HEADERS = {
@@ -83,6 +84,7 @@ _SESSION: Optional[requests.Session] = None
 
 
 def _create_session() -> requests.Session:
+    """Create HTTP session with retry strategy."""
     session = requests.Session()
     adapter = HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=_RETRY_STRATEGY)
     session.mount("https://", adapter)
@@ -92,13 +94,63 @@ def _create_session() -> requests.Session:
 
 
 def _get_session() -> requests.Session:
+    """Get or create singleton HTTP session."""
     global _SESSION
     if _SESSION is None:
         _SESSION = _create_session()
     return _SESSION
 
 
-# ── HTML Fetch ─────────────────────────────────────────────────────────
+# ── Whitelist helpers (hierarchical matching with caching) ───────────────
+
+@lru_cache(maxsize=2048)
+def _extract_root_domain(hostname: str) -> str:
+    """
+    Extract root domain from hostname for hierarchical whitelist matching.
+    
+    Examples:
+    - "support.xbox.com" → "xbox.com"
+    - "mail.google.fr" → "google.fr"
+    - "192.168.1.1" → "192.168.1.1" (IP unchanged)
+    
+    Args:
+        hostname: Full hostname or IP address
+        
+    Returns:
+        Root domain (last 2 parts) or original if fewer than 2 parts
+    """
+    parts = hostname.split(".")
+    if len(parts) >= 2:
+        return ".".join(parts[-2:])
+    return hostname
+
+
+@lru_cache(maxsize=2048)
+def _is_whitelisted(hostname: str) -> bool:
+    """
+    Check if hostname or its root domain is whitelisted.
+    
+    Hierarchical whitelist: if xbox.com is whitelisted, then:
+    - xbox.com ✓
+    - support.xbox.com ✓
+    - mail.xbox.com ✓
+    - any.subdomain.xbox.com ✓
+    
+    Cached for O(1) lookup after first call.
+    
+    Args:
+        hostname: Hostname to check
+        
+    Returns:
+        True if whitelisted, False otherwise
+    """
+    if hostname in TRUSTED_DOMAINS:
+        return True
+    root = _extract_root_domain(hostname)
+    return root in TRUSTED_DOMAINS
+
+
+# ── HTML Fetch ──────────────────────────────────────────────────────────
 
 def _fetch_html(url: str) -> Optional[str]:
     """Return the HTML of the URL or None. Detailed logs for each error type."""
@@ -139,10 +191,11 @@ def _fetch_html(url: str) -> Optional[str]:
     return None
 
 
-# ── Heuristic analysis ───────────────────────────────────────────────────────
+# ── Heuristic analysis ──────────────────────────────────────────────────
 
 @lru_cache(maxsize=512)
 def _ssl_analysis(hostname: str) -> dict:
+    """Analyze SSL certificate for hostname."""
     analysis = {
         "valid_certificate": False,
         "issuer": None,
@@ -192,6 +245,7 @@ def _ssl_analysis(hostname: str) -> dict:
 
 @lru_cache(maxsize=512)
 def _dns_reputation(hostname: str) -> dict:
+    """Check DNS resolution and IP reputation."""
     result = {
         "resolved": False,
         "ip_addresses": [],
@@ -303,9 +357,10 @@ def _heuristic(hostname: str, full_url: str, f: dict) -> tuple[int, list[dict], 
     return min(85, score), reasons, brand_spoofing
 
 
-# ── Score ML ──────────────────────────────────────────────────────────────────
+# ── Score ML ────────────────────────────────────────────────────────────
 
 def _ml_score(f: dict) -> Optional[int]:
+    """Calculate ML phishing score."""
     if not ML_AVAILABLE:
         return None
     try:
@@ -319,7 +374,7 @@ def _ml_score(f: dict) -> Optional[int]:
         return None
 
 
-# ── Feature cache ───────────────────────────────────────────────────────────
+# ── Feature cache ───────────────────────────────────────────────────────
 
 @lru_cache(maxsize=1024)
 def _cached_extract_features(url: str, html_hash: int, html_content: Optional[str]) -> dict:
@@ -327,11 +382,12 @@ def _cached_extract_features(url: str, html_hash: int, html_content: Optional[st
     return extract_features(url, html_content)
 
 
-# ── Entry point ────────────────────────────────────────────────────────────
+# ── Entry point ─────────────────────────────────────────────────────────
 
 _RE_SAFE_NAME = re.compile(r'[^a-zA-Z0-9]')
 
 def analyze_url(url: str) -> dict:
+    """Main URL analysis entry point."""
     t0       = time.monotonic()
     url      = url.strip()
     full_url = url if "://" in url else "https://" + url
@@ -347,8 +403,8 @@ def analyze_url(url: str) -> dict:
 
     logger.info("[analyzer] → %s", hostname)
 
-    # 1. Whitelist: immediate return, no network
-    if hostname in TRUSTED_DOMAINS or any(hostname.endswith("." + d) for d in TRUSTED_DOMAINS):
+    # 1. Whitelist: hierarchical check with caching — immediate return, no network
+    if _is_whitelisted(hostname):
         logger.info("[analyzer] Whitelist hit (%.1fms)", (time.monotonic() - t0) * 1000)
         return {"score": 0, "verdict": "safe", "analyzed_host": hostname,
                 "reasons": [{"text": "Trusted site (whitelist)", "points": 0, "severity": "safe"}],
