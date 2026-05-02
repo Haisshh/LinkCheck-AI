@@ -207,6 +207,21 @@ The system extracts 99+ features including:
 - **Recall**: 99.4% (phishing detection)
 - **F1-Score**: 99.6%
 
+## 🏆 Reputation-Based Analysis
+
+LinkCheck AI integrates multiple trust signals for enhanced accuracy:
+
+- **Tranco top 1M** reputation ranking
+  - **Top 1000 sites**: highest trust boost
+  - **Top 10k sites**: strong trust signal
+  - **Top 100k sites**: moderate reputation support
+  - **Lower ranks**: reduced trust, increased scrutiny
+- **SSL/TLS certificate inspection**: certificate validity, issuer trust, expiration and key strength
+- **DNS reputation**: authoritative name server and resolver trust score
+- **Brand spoofing detection**: suspicious similarities to known brands and lookalike domains
+
+This multi-source trust layer works alongside the ML model and heuristic checks to reduce false positives while improving phishing detection confidence.
+
 ## 🐳 Deployment
 
 ### Docker Deployment
@@ -225,6 +240,33 @@ The system extracts 99+ features including:
    ```bash
    docker logs linkcheck-ai
    ```
+
+### Feedback Discord
+
+- Le webhook Discord doit être configuré uniquement sur le serveur, via la variable d'environnement `DISCORD_FEEDBACK_WEBHOOK`.
+- Ne mettez jamais l'URL du webhook dans le code client ou dans des fichiers commités.
+- L'interface web envoie le signalement vers Flask, et Flask transmet ensuite le message à Discord.
+
+Exemple de configuration locale :
+
+- Windows (PowerShell) :
+  ```powershell
+  $env:DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/xxxxx/xxxxx"
+  python main.py
+  ```
+
+- Linux/macOS :
+  ```bash
+  export DISCORD_FEEDBACK_WEBHOOK="https://discord.com/api/webhooks/xxxxx/xxxxx"
+  python main.py
+  ```
+
+- Docker :
+  ```bash
+  docker run -e DISCORD_FEEDBACK_WEBHOOK="https://discord.com/api/webhooks/xxxxx/xxxxx" -p 5000:5000 linkcheck-ai
+  ```
+
+Le webhook reste secret côté serveur et n'est jamais rendu public dans l'UI.
 
 ### Production Scripts
 

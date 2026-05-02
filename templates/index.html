@@ -226,6 +226,21 @@
           <span class="result-time">${currentTime()}</span>
         </div>
 
+        <div class="feedback-card">
+          <div class="feedback-top">
+            <span class="feedback-label">Faux positif ?</span>
+            <button class="btn-feedback" onclick="toggleFeedbackForm()">Signaler au Discord</button>
+          </div>
+          <div id="feedbackBox" class="feedback-panel hidden">
+            <p class="feedback-note">Envoie ce lien au salon Discord pour vérification manuelle.</p>
+            <textarea id="feedbackComment" class="feedback-textarea" placeholder="Commentaire facultatif (ex: site sûr selon moi)"></textarea>
+            <div class="feedback-actions">
+              <button class="btn-feedback-submit" onclick="sendFeedback()">Envoyer le signalement</button>
+              <span id="feedbackStatus" class="feedback-status"></span>
+            </div>
+          </div>
+        </div>
+
       </div>`;
 
     setTimeout(() => {
@@ -257,6 +272,50 @@
         setTimeout(() => btn.textContent = 'Copier le rapport', 1800);
       }
     });
+  }
+
+  function toggleFeedbackForm() {
+    const panel = document.getElementById('feedbackBox');
+    if (!panel) return;
+    panel.classList.toggle('hidden');
+  }
+
+  async function sendFeedback() {
+    if (!lastResult) return;
+    const comment = document.getElementById('feedbackComment').value.trim();
+    const status = document.getElementById('feedbackStatus');
+    const button = document.querySelector('.btn-feedback-submit');
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Envoi…';
+    }
+    if (status) status.textContent = 'Envoi en cours...';
+
+    try {
+      const res = await fetch('/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: lastResult.inputUrl,
+          analyzed_host: lastResult.analyzed_host,
+          score: lastResult.score,
+          verdict: lastResult.verdict,
+          comment,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || 'Impossible d\'envoyer le feedback');
+      if (status) status.textContent = 'Feedback envoyé 👍';
+      if (button) button.textContent = 'Envoyé';
+      setTimeout(() => {
+        if (status) status.textContent = '';
+        if (button) button.textContent = 'Envoyer le signalement';
+      }, 3000);
+    } catch (err) {
+      if (status) status.textContent = err.message || 'Erreur d\'envoi';
+    } finally {
+      if (button) button.disabled = false;
+    }
   }
 
   // ── Historique de session ─────────────────────────────────────

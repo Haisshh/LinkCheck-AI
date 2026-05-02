@@ -2,8 +2,11 @@
 # Analyse complète d'une URL : whitelist → HTML → features → heuristique → ML → screenshot.
 
 import re
+import ssl
+import socket
 import time
 import logging
+from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
 from functools import lru_cache
@@ -138,86 +141,166 @@ def _fetch_html(url: str) -> Optional[str]:
 
 # ── Analyse heuristique ───────────────────────────────────────────────────────
 
-def _heuristic(hostname: str, full_url: str, f: dict) -> tuple[int, list[dict]]:
+@lru_cache(maxsize=512)
+def _ssl_analysis(hostname: str) -> dict:
+    analysis = {
+        "valid_certificate": False,
+        "issuer": None,
+        "expired": True,
+        "days_to_expire": None,
+        "self_signed": False,
+        "trust_score": 0,
+        "error": None,
+    }
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((hostname, 443), timeout=5) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
+                cert = ssock.getpeercert()
+
+        issuer = cert.get("issuer", ())
+        analysis["issuer"] = " ".join(x[0][1] for x in issuer if x[0][0] == "O") if issuer else None
+        analysis["valid_certificate"] = True
+
+        not_before = datetime.strptime(cert.get("notBefore"), "%b %d %H:%M:%S %Y %Z")
+        not_after = datetime.strptime(cert.get("notAfter"), "%b %d %H:%M:%S %Y %Z")
+        now = datetime.utcnow()
+
+        analysis["expired"] = not (not_before <= now <= not_after)
+        analysis["days_to_expire"] = max((not_after - now).days, 0)
+        analysis["self_signed"] = cert.get("issuer") == cert.get("subject")
+
+        if analysis["valid_certificate"] and not analysis["expired"]:
+            trust_score = 70
+            if analysis["days_to_expire"] > 90:
+                trust_score += 20
+            elif analysis["days_to_expire"] > 30:
+                trust_score += 10
+            elif analysis["days_to_expire"] >= 0:
+                trust_score += 5
+            if not analysis["self_signed"]:
+                trust_score += 10
+            analysis["trust_score"] = min(100, trust_score)
+        else:
+            analysis["trust_score"] = 0
+
+    except Exception as e:
+        analysis["error"] = str(e)
+        analysis["trust_score"] = 0
+    return analysis
+
+
+@lru_cache(maxsize=512)
+def _dns_reputation(hostname: str) -> dict:
+    result = {
+        "resolved": False,
+        "ip_addresses": [],
+        "trust_score": 0,
+        "error": None,
+    }
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+        addresses = sorted({item[4][0] for item in infos if item and item[4]})
+        result["resolved"] = bool(addresses)
+        result["ip_addresses"] = addresses
+        if not addresses:
+            result["trust_score"] = 0
+        else:
+            trust = 60
+            if len(addresses) > 1:
+                trust += 20
+            if any(not ip.startswith(("10.", "172.", "192.168.")) for ip in addresses):
+                trust += 10
+            result["trust_score"] = min(100, trust)
+    except Exception as e:
+        result["error"] = str(e)
+        result["trust_score"] = 0
+    return result
+
+
+def _heuristic(hostname: str, full_url: str, f: dict) -> tuple[int, list[dict], list[dict]]:
     """Règles manuelles. Score plafonné à 85 (le ML ajuste le reste)."""
     score   = 0
     reasons = []
+    brand_spoofing = []
     scheme  = full_url.split("://")[0].lower() if "://" in full_url else "https"
 
     # HTTPS
     if scheme != "https":
-        score += 20
-        reasons.append({"text": "Protocole non sécurisé (HTTP)", "points": 20, "severity": "danger"})
+        score += 10
+        reasons.append({"text": "Protocole non sécurisé (HTTP)", "points": 10, "severity": "danger"})
 
     # Raccourcisseur
     if hostname in SHORTENERS or any(hostname.endswith("." + s) for s in SHORTENERS):
-        score += 15
-        reasons.append({"text": f"Raccourcisseur d'URL ({hostname})", "points": 15, "severity": "danger"})
+        score += 10
+        reasons.append({"text": f"Raccourcisseur d'URL ({hostname})", "points": 10, "severity": "danger"})
 
     # Sous-domaines (réduit pour éviter faux positifs)
     n = f.get("nb_subdomains", 0)
     if n >= 3:
-        pts = min(15, n * 4)
+        pts = min(12, n * 3)
         score += pts
         reasons.append({"text": f"{n} niveaux de sous-domaines", "points": pts, "severity": "warn"})
     elif n == 2:
-        score += 5
-        reasons.append({"text": "Double sous-domaine", "points": 5, "severity": "info"})
+        score += 3
+        reasons.append({"text": "Double sous-domaine", "points": 3, "severity": "info"})
 
     # Longueur domaine (seuils ajustés)
     dl = len(hostname)
     if dl > 50:
-        score += 10
-        reasons.append({"text": f"Domaine très long ({dl} car.)", "points": 10, "severity": "warn"})
+        score += 7
+        reasons.append({"text": f"Domaine très long ({dl} car.)", "points": 7, "severity": "warn"})
     elif dl > 35:
-        score += 5
-        reasons.append({"text": f"Domaine long ({dl} car.)", "points": 5, "severity": "info"})
+        score += 3
+        reasons.append({"text": f"Domaine long ({dl} car.)", "points": 3, "severity": "info"})
 
     # Homoglyphes / usurpation de marque
     url_lower = full_url.lower()
     for brand, fakes in BRAND_FAKES.items():
         if any(fk in hostname for fk in fakes):
-            score += 25
-            reasons.append({"text": f"Imitation de \"{brand}\" par homoglyphe", "points": 25, "severity": "danger"})
+            score += 15
+            reasons.append({"text": f"Imitation de \"{brand}\" par homoglyphe", "points": 15, "severity": "danger"})
+            brand_spoofing.append({"brand": brand, "type": "homoglyph", "matched": [fk for fk in fakes if fk in hostname]})
             break
         if brand in hostname and not (
             hostname == f"{brand}.com" or hostname.endswith(f".{brand}.com")
         ):
-            score += 15
-            reasons.append({"text": f'Marque "{brand}" dans un domaine non officiel', "points": 15, "severity": "danger"})
+            score += 10
+            reasons.append({"text": f'Marque "{brand}" dans un domaine non officiel', "points": 10, "severity": "danger"})
+            brand_spoofing.append({"brand": brand, "type": "brand_imitation", "matched": brand})
             break
 
     # Mots suspects (points réduits)
     found = [w for w in SUSPICIOUS_WORDS if w in url_lower]
     if len(found) >= 3:
-        score += 15
-        reasons.append({"text": f"Termes à risque : {', '.join(found[:4])}", "points": 15, "severity": "warn"})
+        score += 10
+        reasons.append({"text": f"Termes à risque : {', '.join(found[:4])}", "points": 10, "severity": "warn"})
     elif len(found) == 2:
-        score += 8
-        reasons.append({"text": f"Termes suspects : {', '.join(found)}", "points": 8, "severity": "info"})
+        score += 6
+        reasons.append({"text": f"Termes suspects : {', '.join(found)}", "points": 6, "severity": "info"})
     elif len(found) == 1:
-        score += 3
-        reasons.append({"text": f'Terme suspect : "{found[0]}"', "points": 3, "severity": "info"})
+        score += 2
+        reasons.append({"text": f'Terme suspect : "{found[0]}"', "points": 2, "severity": "info"})
 
     # Formulaire de mot de passe dans le HTML (réduit)
     if f.get("has_password_input"):
-        score += 5
-        reasons.append({"text": "Formulaire de mot de passe dans le HTML", "points": 5, "severity": "info"})
+        score += 2
+        reasons.append({"text": "Formulaire de mot de passe dans le HTML", "points": 2, "severity": "info"})
 
     # @ dans l'URL (redirection trompeuse)
     if "@" in full_url:
-        score += 20
-        reasons.append({"text": "Caractère '@' dans l'URL — redirection trompeuse", "points": 20, "severity": "danger"})
+        score += 15
+        reasons.append({"text": "Caractère '@' dans l'URL — redirection trompeuse", "points": 15, "severity": "danger"})
 
     # Bonus combinaison
     if sum(1 for r in reasons if r["severity"] == "danger") >= 3:
-        score += 15
-        reasons.append({"text": "Plusieurs indicateurs critiques combinés", "points": 15, "severity": "danger"})
+        score += 10
+        reasons.append({"text": "Plusieurs indicateurs critiques combinés", "points": 10, "severity": "danger"})
 
     if not reasons:
         reasons.append({"text": "Aucun indicateur suspect identifié", "points": 0, "severity": "safe"})
 
-    return min(85, score), reasons
+    return min(85, score), reasons, brand_spoofing
 
 
 # ── Score ML ──────────────────────────────────────────────────────────────────
@@ -239,9 +322,9 @@ def _ml_score(f: dict) -> Optional[int]:
 # ── Cache pour features ───────────────────────────────────────────────────────
 
 @lru_cache(maxsize=1024)
-def _cached_extract_features(url: str, html_hash: int) -> dict:
+def _cached_extract_features(url: str, html_hash: int, html_content: Optional[str]) -> dict:
     """Cache les features pour éviter les recalculs."""
-    return extract_features(url, None if html_hash == 0 else "dummy")  # Ajuster selon besoin
+    return extract_features(url, html_content)
 
 
 # ── Point d'entrée ────────────────────────────────────────────────────────────
@@ -276,25 +359,31 @@ def analyze_url(url: str) -> dict:
 
     # 3. Features
     html_hash = hash(html) if html else 0
-    f = _cached_extract_features(full_url, html_hash)
+    f = _cached_extract_features(full_url, html_hash, html)
 
     # 4. Heuristique + ML (IA au cœur : 80% ML, 20% heuristique)
-    h_score, reasons = _heuristic(hostname, full_url, f)
+    h_score, reasons, brand_spoofing = _heuristic(hostname, full_url, f)
     ml               = _ml_score(f)
+    ssl_info         = {"skipped": True, "trust_score": 50, "error": "analysis skipped"}
+    dns_info         = {"skipped": True, "trust_score": 50, "error": "analysis skipped"}
+    extra_checks = ml is None or ml >= 40 or h_score >= 20
+    if extra_checks:
+        ssl_info = _ssl_analysis(hostname)
+        dns_info = _dns_reputation(hostname)
     if ml is not None:
-        # IA prioritaire : si ML < 30, safe ; si ML > 70, dangerous
-        if ml < 30:
-            score = max(10, round(0.9 * ml + 0.1 * h_score))
+        # IA prioritaire : moins strict sur les zones grises
+        if ml < 25:
+            score = max(5, round(0.88 * ml + 0.12 * h_score))
             verdict = "safe"
-        elif ml > 70:
-            score = min(90, round(0.9 * ml + 0.1 * h_score))
+        elif ml > 75:
+            score = min(95, round(0.88 * ml + 0.12 * h_score))
             verdict = "dangerous"
         else:
             score = round(0.8 * ml + 0.2 * h_score)
-            verdict = "safe" if score <= 35 else "suspect" if score <= 65 else "dangerous"
+            verdict = "safe" if score <= 40 else "suspect" if score <= 65 else "dangerous"
     else:
         score = h_score
-        verdict = "safe" if score <= 30 else "suspect" if score <= 60 else "dangerous"
+        verdict = "safe" if score <= 35 else "suspect" if score <= 65 else "dangerous"
 
     logger.info("[analyzer] %s → %s %d/100 (%.0fms)",
                 hostname, verdict, score, (time.monotonic() - t0) * 1000)
@@ -308,13 +397,17 @@ def analyze_url(url: str) -> dict:
             logger.error("[analyzer] Screenshot non planifié : %s", e)
 
     return {
-        "score":         score,
-        "verdict":       verdict,
-        "is_phishing":   verdict != "safe",
-        "confidence":    ml / 100 if ml is not None else None,
-        "analyzed_host": hostname,
-        "reasons":       reasons,
-        "ml_score":      ml,
-        "html_captured": html is not None,
-        "screenshot":    None,  # disponible via GET /screenshot/<host>
+        "score":           score,
+        "verdict":         verdict,
+        "is_phishing":     verdict != "safe",
+        "confidence":      ml / 100 if ml is not None else None,
+        "analyzed_host":   hostname,
+        "reasons":         reasons,
+        "ml_score":        ml,
+        "heuristic_score": h_score,
+        "brand_spoofing":  brand_spoofing,
+        "ssl_info":        ssl_info,
+        "dns_info":        dns_info,
+        "html_captured":   html is not None,
+        "screenshot":      None,  # disponible via GET /screenshot/<host>
     }
