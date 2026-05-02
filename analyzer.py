@@ -43,6 +43,13 @@ TRUSTED_DOMAINS: frozenset[str] = frozenset({
     "google.com", "google.fr", "paypal.com", "paypal.fr",
     "apple.com", "microsoft.com", "github.com", "netflix.com",
     "wikipedia.org", "youtube.com", "stackoverflow.com",
+    "amazon.com", "facebook.com", "twitter.com", "linkedin.com",
+    "reddit.com", "instagram.com", "whatsapp.com", "zoom.us",
+    "slack.com", "discord.com", "dropbox.com", "adobe.com",
+    "bankofamerica.com", "wellsfargo.com", "chase.com",
+    "dhl.com", "fedex.com", "ups.com", "usps.com",
+    "mozilla.org", "apache.org", "linux.org", "ubuntu.com",
+    "debian.org", "centos.org", "redhat.com",
 })
 
 # Homoglyphes connus pour chaque marque
@@ -147,24 +154,24 @@ def _heuristic(hostname: str, full_url: str, f: dict) -> tuple[int, list[dict]]:
         score += 15
         reasons.append({"text": f"Raccourcisseur d'URL ({hostname})", "points": 15, "severity": "danger"})
 
-    # Sous-domaines
+    # Sous-domaines (réduit pour éviter faux positifs)
     n = f.get("nb_subdomains", 0)
     if n >= 3:
-        pts = min(25, n * 7)
+        pts = min(15, n * 4)
         score += pts
-        reasons.append({"text": f"{n} niveaux de sous-domaines", "points": pts, "severity": "danger"})
+        reasons.append({"text": f"{n} niveaux de sous-domaines", "points": pts, "severity": "warn"})
     elif n == 2:
-        score += 8
-        reasons.append({"text": "Double sous-domaine", "points": 8, "severity": "warn"})
+        score += 5
+        reasons.append({"text": "Double sous-domaine", "points": 5, "severity": "info"})
 
-    # Longueur domaine
+    # Longueur domaine (seuils ajustés)
     dl = len(hostname)
-    if dl > 40:
-        score += 15
-        reasons.append({"text": f"Domaine très long ({dl} car.)", "points": 15, "severity": "danger"})
-    elif dl > 30:
-        score += 8
-        reasons.append({"text": f"Domaine long ({dl} car.)", "points": 8, "severity": "warn"})
+    if dl > 50:
+        score += 10
+        reasons.append({"text": f"Domaine très long ({dl} car.)", "points": 10, "severity": "warn"})
+    elif dl > 35:
+        score += 5
+        reasons.append({"text": f"Domaine long ({dl} car.)", "points": 5, "severity": "info"})
 
     # Homoglyphes / usurpation de marque
     url_lower = full_url.lower()
@@ -180,22 +187,22 @@ def _heuristic(hostname: str, full_url: str, f: dict) -> tuple[int, list[dict]]:
             reasons.append({"text": f'Marque "{brand}" dans un domaine non officiel', "points": 15, "severity": "danger"})
             break
 
-    # Mots suspects
+    # Mots suspects (points réduits)
     found = [w for w in SUSPICIOUS_WORDS if w in url_lower]
     if len(found) >= 3:
-        score += 20
-        reasons.append({"text": f"Termes à risque : {', '.join(found[:4])}", "points": 20, "severity": "danger"})
+        score += 15
+        reasons.append({"text": f"Termes à risque : {', '.join(found[:4])}", "points": 15, "severity": "warn"})
     elif len(found) == 2:
-        score += 12
-        reasons.append({"text": f"Termes suspects : {', '.join(found)}", "points": 12, "severity": "warn"})
+        score += 8
+        reasons.append({"text": f"Termes suspects : {', '.join(found)}", "points": 8, "severity": "info"})
     elif len(found) == 1:
-        score += 6
-        reasons.append({"text": f'Terme suspect : "{found[0]}"', "points": 6, "severity": "info"})
+        score += 3
+        reasons.append({"text": f'Terme suspect : "{found[0]}"', "points": 3, "severity": "info"})
 
-    # Formulaire de mot de passe dans le HTML
+    # Formulaire de mot de passe dans le HTML (réduit)
     if f.get("has_password_input"):
-        score += 10
-        reasons.append({"text": "Formulaire de mot de passe dans le HTML", "points": 10, "severity": "warn"})
+        score += 5
+        reasons.append({"text": "Formulaire de mot de passe dans le HTML", "points": 5, "severity": "info"})
 
     # @ dans l'URL (redirection trompeuse)
     if "@" in full_url:
@@ -271,11 +278,23 @@ def analyze_url(url: str) -> dict:
     html_hash = hash(html) if html else 0
     f = _cached_extract_features(full_url, html_hash)
 
-    # 4. Heuristique + ML
+    # 4. Heuristique + ML (IA au cœur : 80% ML, 20% heuristique)
     h_score, reasons = _heuristic(hostname, full_url, f)
     ml               = _ml_score(f)
-    score            = min(100, round(0.55 * ml + 0.45 * h_score) if ml is not None else h_score)
-    verdict          = "safe" if score <= 30 else "suspect" if score <= 60 else "dangerous"
+    if ml is not None:
+        # IA prioritaire : si ML < 30, safe ; si ML > 70, dangerous
+        if ml < 30:
+            score = max(10, round(0.9 * ml + 0.1 * h_score))
+            verdict = "safe"
+        elif ml > 70:
+            score = min(90, round(0.9 * ml + 0.1 * h_score))
+            verdict = "dangerous"
+        else:
+            score = round(0.8 * ml + 0.2 * h_score)
+            verdict = "safe" if score <= 35 else "suspect" if score <= 65 else "dangerous"
+    else:
+        score = h_score
+        verdict = "safe" if score <= 30 else "suspect" if score <= 60 else "dangerous"
 
     logger.info("[analyzer] %s → %s %d/100 (%.0fms)",
                 hostname, verdict, score, (time.monotonic() - t0) * 1000)
@@ -291,6 +310,8 @@ def analyze_url(url: str) -> dict:
     return {
         "score":         score,
         "verdict":       verdict,
+        "is_phishing":   verdict != "safe",
+        "confidence":    ml / 100 if ml is not None else None,
         "analyzed_host": hostname,
         "reasons":       reasons,
         "ml_score":      ml,
