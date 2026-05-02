@@ -246,6 +246,8 @@ This multi-source trust layer works alongside the ML model and heuristic checks 
 - Le webhook Discord doit être configuré uniquement sur le serveur, via la variable d'environnement `DISCORD_FEEDBACK_WEBHOOK`.
 - Ne mettez jamais l'URL du webhook dans le code client ou dans des fichiers commités.
 - L'interface web envoie le signalement vers Flask, et Flask transmet ensuite le message à Discord.
+- Les retours sont enregistrés localement dans `data/feedback.jsonl` par défaut.
+- Configurez `FEEDBACK_ADMIN_TOKEN` pour consulter les retours via `/admin/feedback?token=<votre_token>`.
 
 Exemple de configuration locale :
 
@@ -263,10 +265,27 @@ Exemple de configuration locale :
 
 - Docker :
   ```bash
-  docker run -e DISCORD_FEEDBACK_WEBHOOK="https://discord.com/api/webhooks/xxxxx/xxxxx" -p 5000:5000 linkcheck-ai
+  docker run -e DISCORD_FEEDBACK_WEBHOOK="https://discord.com/api/webhooks/xxxxx/xxxxx" \
+             -e FEEDBACK_ADMIN_TOKEN="votre_token_secret" \
+             -p 5000:5000 linkcheck-ai
   ```
 
+Pour utiliser le tableau de bord des retours, ajoutez également :
+```bash
+-e FEEDBACK_ADMIN_TOKEN="votre_token_secret"
+```
+
 Le webhook reste secret côté serveur et n'est jamais rendu public dans l'UI.
+
+### Render Deployment
+
+1. Dans Render, créer un service Web à partir de ton dépôt GitHub.
+2. Définir ces variables d'environnement dans le service :
+   - `DISCORD_FEEDBACK_WEBHOOK`
+   - `FEEDBACK_ADMIN_TOKEN`
+3. Lancer le service sur le port `5000` si Render ne le fait pas automatiquement.
+
+Render utilise ses propres variables d'environnement, donc tu n'as pas besoin de pousser ton vrai `.env` sur GitHub.
 
 ### Production Scripts
 

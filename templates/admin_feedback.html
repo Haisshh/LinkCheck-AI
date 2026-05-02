@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LinkCheck Admin Feedback</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111; background: #f8f9fb; }
+    .container { max-width: 960px; margin: 0 auto; }
+    h1 { margin-bottom: 0.25em; }
+    .notice { padding: 12px 16px; background: #fff; border: 1px solid #dfe2e8; border-radius: 10px; margin-bottom: 20px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; padding: 10px 18px; border: none; border-radius: 8px; background: #2a76f7; color: white; text-decoration: none; cursor: pointer; }
+    .btn.secondary { background: #6c757d; }
+    .filter { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+    .filter input { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; width: 240px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #dfe2e8; }
+    th, td { padding: 12px 10px; border-bottom: 1px solid #e9ecef; text-align: left; vertical-align: top; }
+    th { background: #f1f5f9; font-weight: 600; }
+    td small { color: #6b7280; }
+    .empty { padding: 20px; background: #fff; border: 1px dashed #cbd5e1; border-radius: 10px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Administration des feedbacks</h1>
+    <div class="notice">
+      <p>Cette page affiche les retours stockés côté serveur. Pour y accéder, utilisez un token admin valide via <code>token=...</code> dans l'URL ou l'en-tête <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+    </div>
+    <div class="actions">
+      <button class="btn" onclick="loadFeedback()">Rafraîchir</button>
+      <a id="downloadLink" class="btn secondary" href="#">Télécharger le fichier JSON</a>
+      <span id="statusMessage"></span>
+    </div>
+    <div class="filter">
+      <label for="filterInput">Filtrer par URL ou verdict :</label>
+      <input id="filterInput" type="text" placeholder="Tapez une recherche..." oninput="renderTable()" />
+    </div>
+    <div id="feedbackContainer"></div>
+  </div>
+  <script>
+    const token = new URLSearchParams(window.location.search).get('token');
+    const apiUrl = '/admin/feedback/json' + (token ? '?token=' + encodeURIComponent(token) : '');
+    const downloadUrl = '/admin/feedback/download' + (token ? '?token=' + encodeURIComponent(token) : '');
+    const statusEl = document.getElementById('statusMessage');
+    const downloadLink = document.getElementById('downloadLink');
+    let records = [];
+
+    downloadLink.href = downloadUrl;
+
+    async function loadFeedback() {
+      statusEl.textContent = 'Chargement...';
+      try {
+        const res = await fetch(apiUrl, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          statusEl.textContent = body.error || body.message || 'Erreur de chargement';
+          document.getElementById('feedbackContainer').innerHTML = '';
+          return;
+        }
+        records = await res.json();
+        renderTable();
+        statusEl.textContent = `${records.length} retours chargés`;
+      } catch (err) {
+        statusEl.textContent = 'Erreur réseau';
+      }
+    }
+
+    function renderTable() {
+      const query = document.getElementById('filterInput').value.trim().toLowerCase();
+      const filtered = records.filter(item => {
+        return item.url.toLowerCase().includes(query)
+          || (item.verdict || '').toLowerCase().includes(query)
+          || (item.comment || '').toLowerCase().includes(query);
+      });
+
+      if (!filtered.length) {
+        document.getElementById('feedbackContainer').innerHTML = '<div class="empty">Aucun feedback à afficher.</div>';
+        return;
+      }
+
+      const rows = filtered.map(item => `
+        <tr>
+          <td><strong>${escapeHtml(item.url)}</strong><br/><small>${escapeHtml(item.analyzed_host || 'N/A')}</small></td>
+          <td>${escapeHtml(String(item.score || 'N/A'))}</td>
+          <td>${escapeHtml(item.verdict || 'N/A')}</td>
+          <td>${escapeHtml(item.comment || '')}</td>
+          <td><small>${escapeHtml(item.timestamp || '')}</small></td>
+        </tr>
+      `).join('');
+
+      document.getElementById('feedbackContainer').innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>URL</th>
+              <th>Score</th>
+              <th>Verdict</th>
+              <th>Commentaire</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    loadFeedback();
+  </script>
+</body>
+</html>

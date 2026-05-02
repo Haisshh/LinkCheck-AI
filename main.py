@@ -5,11 +5,13 @@
 import os
 import re
 import zipfile
+import json
 import logging
 import requests
+from datetime import datetime
 
 import pandas as pd
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, abort, jsonify, render_template, request, send_file
 from flask_limiter import Limiter
 
 
@@ -56,6 +58,8 @@ limiter = Limiter(_rate_key, app=app, default_limits=["30 per minute"])
 _TRANCO_PATH = "data/tranco_GV97K-1m.csv.zip"
 _REPUTATION: dict[str, int] = {}
 DISCORD_FEEDBACK_WEBHOOK = os.environ.get("DISCORD_FEEDBACK_WEBHOOK")
+FEEDBACK_STORAGE_PATH = os.environ.get("FEEDBACK_STORAGE_PATH", "data/feedback.jsonl")
+FEEDBACK_ADMIN_TOKEN = os.environ.get("FEEDBACK_ADMIN_TOKEN")
 
 
 def _load_tranco() -> None:
@@ -193,6 +197,70 @@ def _send_feedback_to_discord(payload: dict) -> tuple[bool, str]:
         return False, str(e)
 
 
+def _store_feedback_record(record: dict) -> None:
+    storage_folder = os.path.dirname(FEEDBACK_STORAGE_PATH)
+    if storage_folder:
+        os.makedirs(storage_folder, exist_ok=True)
+    with open(FEEDBACK_STORAGE_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _authorize_admin() -> None:
+    if not FEEDBACK_ADMIN_TOKEN:
+        abort(403, description="Feedback admin token not configured")
+    auth_header = request.headers.get("Authorization", "")
+    token = None
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = request.args.get("token", "").strip()
+    if token != FEEDBACK_ADMIN_TOKEN:
+        abort(401, description="Invalid admin token")
+
+
+def _load_feedback_records(limit: int | None = None) -> list[dict]:
+    if not os.path.exists(FEEDBACK_STORAGE_PATH):
+        return []
+    records = []
+    with open(FEEDBACK_STORAGE_PATH, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    if limit is not None and len(records) > limit:
+        return records[-limit:]
+    return records
+
+
+@app.get("/admin/feedback")
+def admin_feedback():
+    _authorize_admin()
+    return render_template("admin_feedback.html")
+
+
+@app.get("/admin/feedback/json")
+def admin_feedback_json():
+    _authorize_admin()
+    limit = request.args.get("limit")
+    try:
+        limit_value = int(limit) if limit else None
+    except ValueError:
+        limit_value = None
+    return jsonify(_load_feedback_records(limit=limit_value))
+
+
+@app.get("/admin/feedback/download")
+def admin_feedback_download():
+    _authorize_admin()
+    if not os.path.exists(FEEDBACK_STORAGE_PATH):
+        return jsonify({"error": "No feedback file found"}), 404
+    return send_file(FEEDBACK_STORAGE_PATH, mimetype="application/json", as_attachment=True, download_name=os.path.basename(FEEDBACK_STORAGE_PATH))
+
+
 @app.post("/feedback")
 def feedback():
     body = request.get_json(silent=True) or {}
@@ -220,12 +288,32 @@ def feedback():
         ]
     }
 
-    sent, error = _send_feedback_to_discord(embed)
-    if not sent:
-        logger.warning("[main] Discord feedback failed: %s", error)
-        return jsonify({"error": "Unable to send feedback", "detail": error}), 502
+    record = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "url": url,
+        "analyzed_host": analyzed_host,
+        "score": score,
+        "verdict": verdict,
+        "comment": comment,
+        "discord_webhook_configured": bool(DISCORD_FEEDBACK_WEBHOOK),
+    }
 
-    return jsonify({"status": "ok", "message": "Feedback sent"}), 200
+    try:
+        _store_feedback_record(record)
+    except Exception as e:
+        logger.error("[main] Feedback storage failed: %s", e)
+        return jsonify({"error": "Unable to save feedback locally", "detail": str(e)}), 500
+
+    sent, error = _send_feedback_to_discord(embed)
+    if sent:
+        return jsonify({"status": "ok", "message": "Feedback sent"}), 200
+
+    logger.warning("[main] Discord feedback fallback: %s", error)
+    return jsonify({
+        "status": "ok",
+        "message": "Feedback received and saved on server",
+        "detail": error,
+    }), 200
 
 
 _RE_SAFE = re.compile(r'[^a-zA-Z0-9_]')
