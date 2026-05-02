@@ -52,8 +52,10 @@ def save_to_disk(results_list):
     if os.path.exists(OUTPUT_PATH):
         old_df = pd.read_csv(OUTPUT_PATH)
         combined_df = pd.concat([old_df, new_df], ignore_index=True)
-        # Supprimer les doublons basés sur les caractéristiques pour éviter de polluer l'IA
-        combined_df = combined_df.drop_duplicates(subset=FEATURE_NAMES)
+        # Supprimer les doublons basés sur les caractéristiques communes pour éviter de polluer l'IA
+        common_features = [f for f in FEATURE_NAMES if f in combined_df.columns]
+        if common_features:
+            combined_df = combined_df.drop_duplicates(subset=common_features)
         combined_df.to_csv(OUTPUT_PATH, index=False)
     else:
         os.makedirs("data", exist_ok=True)
@@ -133,4 +135,4 @@ def run_scraper(n_sites=50000):
     print("\n✨ Mission terminée ! Ton dataset est prêt pour la version 1.2.")
 
 if __name__ == "__main__":
-    run_scraper(12000)
+    run_scraper(50000)

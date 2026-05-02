@@ -25,7 +25,7 @@ TRAIN_PATH = "data/extracted/Training.parquet"
 TEST_PATH  = "data/extracted/Testing.parquet"
 MODEL_OUT  = "model.pkl"
 FEAT_OUT   = "features.pkl"
-DROP_COLS  = {"url", "status"}
+DROP_COLS  = {"url", "label"}
 
 
 def _load() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -40,15 +40,15 @@ def _load() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def _prepare(train: pd.DataFrame, test: pd.DataFrame):
-    if "status" not in train.columns:
-        logger.error("Colonne 'status' absente. Disponibles : %s", list(train.columns))
+    if "label" not in train.columns:
+        logger.error("Colonne 'label' absente. Disponibles : %s", list(train.columns))
         sys.exit(1)
 
     drop_t = [c for c in DROP_COLS if c in train.columns]
     drop_e = [c for c in DROP_COLS if c in test.columns]
 
-    X_train, y_train = train.drop(columns=drop_t).fillna(0), train["status"]
-    X_test,  y_test  = test.drop(columns=drop_e).fillna(0),  test["status"]
+    X_train, y_train = train.drop(columns=drop_t).fillna(0), train["label"]
+    X_test,  y_test  = test.drop(columns=drop_e).fillna(0),  test["label"]
 
     if list(X_train.columns) != list(X_test.columns):
         only_tr = set(X_train.columns) - set(X_test.columns)
@@ -100,11 +100,14 @@ def _train_and_save(X_train, y_train, X_test, y_test, feat_names: list) -> None:
     logger.info("Accuracy : %.2f%%", accuracy_score(y_test, y_pred) * 100)
     print(classification_report(y_test, y_pred))
 
-    top10 = sorted(zip(feat_names, model.feature_importances_),
-                   key=lambda x: x[1], reverse=True)[:10]
-    logger.info("Top 10 features :")
-    for name, imp in top10:
-        logger.info("  %-38s %.4f", name, imp)
+    if hasattr(model, 'feature_importances_'):
+        top10 = sorted(zip(feat_names, model.feature_importances_),
+                       key=lambda x: x[1], reverse=True)[:10]
+        logger.info("Top 10 features :")
+        for name, imp in top10:
+            logger.info("  %-38s %.4f", name, imp)
+    else:
+        logger.info("Feature importances not available for this model.")
 
     joblib.dump(model, MODEL_OUT)
     joblib.dump(feat_names, FEAT_OUT)

@@ -189,7 +189,7 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
         if brand in path:
             brand_in_path = 1
 
-    suspecious_tld = int(tld in SUSPICIOUS_TLDS)
+    suspicious_tld = int(tld in SUSPICIOUS_TLDS)
 
     # ── Features HTML ──────────────────────────────────────────────
     if has_html:
@@ -246,12 +246,25 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
         nb_ext_img      = int(domain_in_brand or brand_in_subdomain)
         status_code     = -1
 
+    # ── Nouvelles features pour améliorer la détection ─────────────────
+    url_entropy = _entropy(full)
+    domain_entropy = _entropy(domain)
+    subdomain_entropy = _entropy(subdomain)
+    has_ip = int(bool(re.match(r'\d+\.\d+\.\d+\.\d+', hostname)))
+    nb_suspicious_chars = nb_at + nb_percent + nb_dollar + nb_star + nb_tilde
+    query_length = len(query)
+    fragment_length = len(parsed.fragment)
+    has_fragment = int(bool(parsed.fragment))
+    nb_params = len(query.split('&')) if query else 0
+    has_https = int(parsed.scheme == 'https')
+    domain_age_like = int(len(domain) > 10 and not random_domain)  # Proxy pour l'âge du domaine
+
     # Images de tracking dérivées
-    nb_sm          = nb_ext_img
-    nb_sm_total    = nb_ext_img * 2
-    r_sm           = round(nb_ext_img * 0.5, 2)
-    r_sm_fav       = round(nb_ext_img * 0.3, 2)
-    r_sm_total     = round(nb_ext_img * 0.4, 2)
+    nb_sm = nb_ext_img
+    nb_sm_total = nb_ext_img * 2
+    r_sm = round(nb_ext_img * 0.5, 2)
+    r_sm_fav = round(nb_ext_img * 0.3, 2)
+    r_sm_total = round(nb_ext_img * 0.4, 2)
     r_sm_total_fav = round(nb_ext_img * 0.2, 2)
 
     return {
@@ -312,7 +325,7 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
         "brand_in_subdomain":                  brand_in_subdomain,
         "brand_in_path":                       brand_in_path,
         "has_brand_in_url":                    has_brand,
-        "suspecious_tld":                      suspecious_tld,
+        "suspicious_tld":                      suspicious_tld,
         "statistical_report":                  statistical_report,
         "nb_hyperlinks":                       nb_hyperlinks,
         "nb_forms":                            nb_forms,
@@ -343,6 +356,18 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
         "nb_extSmallImgTotalRatioTotalFavicon":r_sm_total_fav,
         "nb_extCSS":                           nb_ext_css,
         "status_code":                         status_code,
+        # Nouvelles features
+        "url_entropy":                         url_entropy,
+        "domain_entropy":                      domain_entropy,
+        "subdomain_entropy":                   subdomain_entropy,
+        "has_ip":                              has_ip,
+        "nb_suspicious_chars":                 nb_suspicious_chars,
+        "query_length":                        query_length,
+        "fragment_length":                     fragment_length,
+        "has_fragment":                        has_fragment,
+        "nb_params":                           nb_params,
+        "has_https":                           has_https,
+        "domain_age_like":                     domain_age_like,
     }
 
 
