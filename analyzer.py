@@ -56,15 +56,77 @@ THREAT_INTEL_WAIT_SECONDS = float(os.environ.get("LINKCHECK_THREAT_INTEL_WAIT", 
 # Whitelist: root domains only (hierarchical matching enabled)
 # Subdomains automatically covered: e.g., xbox.com → support.xbox.com, mail.xbox.com, etc.
 TRUSTED_DOMAINS: frozenset[str] = frozenset({
-    "google.com", "paypal.com", "apple.com", "microsoft.com", "github.com",
-    "netflix.com", "wikipedia.org", "youtube.com", "stackoverflow.com",
-    "amazon.com", "facebook.com", "twitter.com", "linkedin.com",
-    "reddit.com", "instagram.com", "whatsapp.com", "zoom.us",
-    "slack.com", "discord.com", "dropbox.com", "adobe.com",
-    "bankofamerica.com", "wellsfargo.com", "chase.com",
-    "dhl.com", "fedex.com", "ups.com", "usps.com",
-    "mozilla.org", "apache.org", "linux.org", "ubuntu.com",
-    "debian.org", "centos.org", "redhat.com", "xbox.com",
+
+    # --- Big Tech ---
+    "google.com", "youtube.com", "gmail.com", "googleapis.com",
+    "microsoft.com", "live.com", "outlook.com", "office.com",
+    "apple.com", "icloud.com",
+    "amazon.com", "aws.amazon.com",
+    "meta.com", "facebook.com", "instagram.com", "whatsapp.com",
+    "x.com", "twitter.com",
+    "linkedin.com",
+
+    # --- Dev / Tech ---
+    "github.com", "gitlab.com", "bitbucket.org",
+    "stackoverflow.com", "stackexchange.com",
+    "docker.com", "kubernetes.io",
+    "digitalocean.com", "heroku.com",
+    "vercel.com", "netlify.com",
+    "cloudflare.com",
+
+    # --- Streaming ---
+    "netflix.com", "spotify.com", "twitch.tv",
+    "disneyplus.com", "primevideo.com",
+
+    # --- E-commerce ---
+    "amazon.com", "ebay.com", "aliexpress.com",
+    "cdiscount.com", "fnac.com", "darty.com",
+    "vinted.com", "leboncoin.fr",
+
+    # --- Paiement / Banque ---
+    "paypal.com", "stripe.com",
+    "wise.com", "revolut.com",
+    "visa.com", "mastercard.com",
+
+    # --- Banques FR ---
+    "credit-agricole.fr", "societegenerale.fr",
+    "bnpparibas.fr", "labanquepostale.fr",
+    "caissedepargne.fr", "banquepopulaire.fr",
+
+    # --- Livraison ---
+    "dhl.com", "fedex.com", "ups.com",
+    "chronopost.fr", "colissimo.fr", "laposte.fr",
+
+    # --- Sécurité / Open source ---
+    "mozilla.org", "apache.org", "linux.org",
+    "ubuntu.com", "debian.org", "redhat.com",
+    "kali.org", "archlinux.org",
+
+    # --- Éducation ---
+    "wikipedia.org", "coursera.org", "edx.org",
+    "openclassrooms.com", "khanacademy.org",
+
+    # --- Communication ---
+    "discord.com", "slack.com", "zoom.us",
+    "skype.com", "teams.microsoft.com",
+
+    # --- Cloud / SaaS ---
+    "dropbox.com", "box.com",
+    "notion.so", "airtable.com",
+
+    # --- Jeux ---
+    "steampowered.com", "epicgames.com",
+    "riotgames.com", "blizzard.com",
+    "playstation.com", "xbox.com",
+
+    # --- Médias ---
+    "bbc.com", "cnn.com", "lemonde.fr",
+    "nytimes.com", "theguardian.com",
+
+    # --- Gouvernement (exemples) ---
+    "service-public.fr", "gouv.fr",
+    "impots.gouv.fr", "ameli.fr",
+
 })
 
 # Homoglyphes connus pour chaque marque - use frozenset for O(1) lookup
@@ -113,6 +175,15 @@ def _get_session() -> requests.Session:
 
 
 # ── Whitelist helpers (hierarchical matching with caching) ───────────────
+
+def is_trusted(domain: str) -> bool:
+    domain = domain.lower().strip()
+
+    for trusted in TRUSTED_DOMAINS:
+        if domain == trusted or domain.endswith("." + trusted):
+            return True
+
+    return False
 
 @lru_cache(maxsize=2048)
 def _extract_root_domain(hostname: str) -> str:
