@@ -2,6 +2,7 @@
 # Full URL analysis pipeline: whitelist -> HTML fetch -> features -> heuristic scoring -> ML scoring -> screenshot.
 
 import re
+import os
 import ssl
 import socket
 import time
@@ -21,6 +22,12 @@ from urllib3.util import Retry
 from features import extract_features, FEATURE_NAMES, SUSPICIOUS_WORDS, SHORTENERS
 from screenshot import take_screenshot_async
 
+try:
+    from threat_intel import query_all_async
+except Exception as e:
+    query_all_async = None  # type: ignore[assignment]
+    logging.getLogger("linkcheck.analyzer").warning("[analyzer] Threat intel disabled: %s", e)
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger("linkcheck.analyzer")
 
@@ -39,6 +46,10 @@ except Exception as e:
     logger.error("[analyzer] Model load error: %s", e)
 
 ML_AVAILABLE = _model is not None and _feat_names is not None
+THREAT_INTEL_ENABLED = os.environ.get("LINKCHECK_THREAT_INTEL", "true").lower() not in {
+    "0", "false", "no", "off"
+}
+THREAT_INTEL_WAIT_SECONDS = float(os.environ.get("LINKCHECK_THREAT_INTEL_WAIT", "2.5"))
 
 # ── Constantes ───────────────────────────────────────────────────────────
 
@@ -386,6 +397,71 @@ def _cached_extract_features(url: str, html_hash: int, html_content: Optional[st
 
 _RE_SAFE_NAME = re.compile(r'[^a-zA-Z0-9]')
 
+
+def _collect_threat_intel(future) -> dict:
+    """Return threat intelligence if it finishes quickly; never break analysis."""
+    if future is None:
+        return {
+            "enabled": THREAT_INTEL_ENABLED,
+            "available": False,
+            "error": "not scheduled",
+        }
+    try:
+        ti = future.result(timeout=THREAT_INTEL_WAIT_SECONDS)
+        ti["enabled"] = True
+        ti["available"] = ti.get("apis_checked", 0) > 0
+        return ti
+    except Exception as e:
+        logger.warning("[analyzer] Threat intel unavailable: %s", e)
+        return {
+            "enabled": True,
+            "available": False,
+            "error": f"{type(e).__name__}: {e}",
+            "is_malicious": False,
+            "threat_score": 0,
+            "flagged_by": [],
+            "sources": {},
+            "apis_checked": 0,
+            "apis_skipped": 0,
+        }
+
+
+def _apply_threat_intel(score: int, verdict: str, reasons: list[dict], threat_intel: dict) -> tuple[int, str]:
+    """Blend external reputation into the existing local/ML score."""
+    if not threat_intel.get("available"):
+        return score, verdict
+
+    flagged_by = threat_intel.get("flagged_by", [])
+    threat_score = int(threat_intel.get("threat_score") or 0)
+
+    if flagged_by:
+        label = ", ".join(flagged_by[:3])
+        reasons.append({
+            "text": f"Threat intelligence flagged this URL ({label})",
+            "points": max(20, min(45, threat_score)),
+            "severity": "danger",
+        })
+        return max(score, threat_score, 75), "dangerous"
+
+    if threat_score >= 55:
+        reasons.append({
+            "text": f"Elevated external reputation risk ({threat_score}/100)",
+            "points": 12,
+            "severity": "warn",
+        })
+        blended = max(score, round(score * 0.75 + threat_score * 0.25))
+        return blended, "suspect" if blended > 40 and verdict == "safe" else verdict
+
+    if threat_intel.get("apis_checked", 0) > 0:
+        reasons.append({
+            "text": f"External reputation sources checked ({threat_intel.get('apis_checked')})",
+            "points": 0,
+            "severity": "safe",
+        })
+
+    return score, verdict
+
+
 def analyze_url(url: str) -> dict:
     """Main URL analysis entry point."""
     t0       = time.monotonic()
@@ -399,7 +475,8 @@ def analyze_url(url: str) -> dict:
         logger.warning("[analyzer] Malformed URL: %s", url)
         return {"score": 0, "verdict": "error", "analyzed_host": url,
                 "reasons": [{"text": "Invalid URL", "points": 0, "severity": "info"}],
-                "html_captured": False, "screenshot": None}
+                "html_captured": False, "screenshot": None,
+                "threat_intel": {"enabled": THREAT_INTEL_ENABLED, "available": False, "error": "invalid URL"}}
 
     logger.info("[analyzer] → %s", hostname)
 
@@ -408,7 +485,15 @@ def analyze_url(url: str) -> dict:
         logger.info("[analyzer] Whitelist hit (%.1fms)", (time.monotonic() - t0) * 1000)
         return {"score": 0, "verdict": "safe", "analyzed_host": hostname,
                 "reasons": [{"text": "Trusted site (whitelist)", "points": 0, "severity": "safe"}],
-                "html_captured": False, "screenshot": None}
+                "html_captured": False, "screenshot": None,
+                "threat_intel": {"enabled": THREAT_INTEL_ENABLED, "available": False, "skipped": "trusted domain"}}
+
+    threat_future = None
+    if THREAT_INTEL_ENABLED and query_all_async is not None:
+        try:
+            threat_future = query_all_async(full_url)
+        except Exception as e:
+            logger.warning("[analyzer] Threat intel not scheduled: %s", e)
 
     # 2. HTML
     html = _fetch_html(full_url)
@@ -444,11 +529,17 @@ def analyze_url(url: str) -> dict:
     logger.info("[analyzer] %s → %s %d/100 (%.0fms)",
                 hostname, verdict, score, (time.monotonic() - t0) * 1000)
 
+    threat_intel = _collect_threat_intel(threat_future)
+    score, verdict = _apply_threat_intel(score, verdict, reasons, threat_intel)
+
+    screenshot_path = None
+
     # 5. Screenshot async (uniquement si suspect/dangereux)
     if verdict in ("suspect", "dangerous"):
         try:
             safe_name = _RE_SAFE_NAME.sub("_", hostname)[:40]
             take_screenshot_async(full_url, safe_name)
+            screenshot_path = f"screenshot/{safe_name}"
         except Exception as e:
             logger.error("[analyzer] Screenshot non planifié : %s", e)
 
@@ -464,6 +555,7 @@ def analyze_url(url: str) -> dict:
         "brand_spoofing":  brand_spoofing,
         "ssl_info":        ssl_info,
         "dns_info":        dns_info,
+        "threat_intel":    threat_intel,
         "html_captured":   html is not None,
-        "screenshot":      None,  # disponible via GET /screenshot/<host>
+        "screenshot":      screenshot_path,
     }

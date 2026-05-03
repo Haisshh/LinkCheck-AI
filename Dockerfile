@@ -6,6 +6,7 @@ WORKDIR /app
 
 # Install system dependencies for Chrome/Selenium
 RUN apt-get update && apt-get install -y \
+    curl \
     wget \
     gnupg \
     unzip \
@@ -34,5 +35,5 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5000/ || exit 1
 
-# Run with Gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--threads", "2", "main:app"]
+# Run with Gunicorn for production. Render injects PORT at runtime.
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-5000} --workers ${WEB_CONCURRENCY:-2} --threads ${GUNICORN_THREADS:-4} --timeout ${GUNICORN_TIMEOUT:-120} main:app"]

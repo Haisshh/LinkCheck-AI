@@ -39,7 +39,7 @@ from analyzer import analyze_url
 # ── Logging ──────────────────────────────────────────────────────────────
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
     datefmt="%H:%M:%S",
 )
@@ -48,6 +48,7 @@ logger = logging.getLogger("linkcheck.main")
 # ── App Flask ────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-only-change-me")
 
 def _rate_key() -> str:
     """
@@ -60,7 +61,12 @@ def _rate_key() -> str:
     fwd = request.headers.get("X-Forwarded-For", "")
     return fwd.split(",")[0].strip() if fwd else (request.remote_addr or "unknown")
 
-limiter = Limiter(_rate_key, app=app, default_limits=["30 per minute"])
+limiter = Limiter(
+    _rate_key,
+    app=app,
+    default_limits=["30 per minute"],
+    storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
+)
 
 # ── Tranco ───────────────────────────────────────────────────────────────
 
@@ -115,30 +121,43 @@ def _combine_trust(result: dict) -> int:
     Combine multiple trust signals into a single score.
     
     Weights:
-    - ML score: 40%
+    - ML trust: 35%
     - Heuristic: 20%
     - Tranco: 20%
-    - SSL: 10%
-    - DNS: 10%
+    - Threat intelligence: 15%
+    - SSL: 5%
+    - DNS: 5%
     """
+    if result.get("verdict") == "safe" and any(
+        "Trusted site" in str(reason.get("text", ""))
+        for reason in result.get("reasons", [])
+    ):
+        return 100
+
     ml = result.get("ml_score")
     heuristic = result.get("heuristic_score")
     ssl = result.get("ssl_info", {}).get("trust_score")
     dns = result.get("dns_info", {}).get("trust_score")
     tranco = result.get("tranco_score")
+    threat = result.get("threat_intel", {})
 
-    ml_trust = ml if ml is not None else 50
+    ml_trust = 100 - ml if ml is not None else 50
     heuristic_trust = 100 - heuristic if heuristic is not None else 50
     ssl_trust = ssl if ssl is not None else 50
     dns_trust = dns if dns is not None else 50
     tranco_trust = tranco if tranco is not None else 50
+    if threat.get("available"):
+        threat_trust = 0 if threat.get("is_malicious") else max(0, 100 - int(threat.get("threat_score") or 0))
+    else:
+        threat_trust = 50
 
     score = (
-        ml_trust * 0.4 +
+        ml_trust * 0.35 +
         heuristic_trust * 0.2 +
         tranco_trust * 0.2 +
-        ssl_trust * 0.1 +
-        dns_trust * 0.1
+        threat_trust * 0.15 +
+        ssl_trust * 0.05 +
+        dns_trust * 0.05
     )
     return round(score)
 

@@ -170,7 +170,14 @@
         <div class="screenshot-area">
           <div class="field-label" style="margin-bottom:12px">Aperçu visuel (Sandbox)</div>
           <div class="screenshot-frame">
-            <img src="/${data.screenshot}" alt="Capture d'écran du site" class="screenshot-img">
+            <img
+              src="/${data.screenshot}?t=${Date.now()}"
+              data-screenshot-path="${escapeHtml(data.screenshot)}"
+              data-retry-count="0"
+              alt="Capture d'écran du site"
+              class="screenshot-img"
+              onerror="retryScreenshot(this)"
+            >
           </div>
         </div>
       `;
@@ -247,6 +254,20 @@
       const bar = document.getElementById('scoreBar');
       if (bar) bar.style.width = data.score + '%';
     }, 60);
+  }
+
+  function retryScreenshot(img) {
+    const maxRetries = 8;
+    const count = Number(img.dataset.retryCount || '0');
+    const path = img.dataset.screenshotPath;
+    if (!path || count >= maxRetries) {
+      img.closest('.screenshot-area')?.classList.add('hidden');
+      return;
+    }
+    img.dataset.retryCount = String(count + 1);
+    setTimeout(() => {
+      img.src = `/${path}?t=${Date.now()}`;
+    }, 2000);
   }
 
   // ── Copier le rapport ─────────────────────────────────────────

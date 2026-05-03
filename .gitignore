@@ -1,6 +1,8 @@
 # Ne pas envoyer le dossier de l'environnement virtuel
 venv/
 .env
+.env.*
+!.env.example
 
 # Ne pas envoyer les données brutes (trop lourd et privé)
 data/scraped_data.csv
