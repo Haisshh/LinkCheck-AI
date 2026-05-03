@@ -151,6 +151,16 @@ def _combine_trust(result: dict) -> int:
     else:
         threat_trust = 50
 
+    clean_reputation = (
+        result.get("verdict") == "safe"
+        and threat.get("available")
+        and int(threat.get("apis_checked") or 0) >= 3
+        and not threat.get("flagged_by")
+    )
+    if clean_reputation:
+        ml_trust = max(ml_trust, 70)
+        threat_trust = max(threat_trust, 90)
+
     score = (
         ml_trust * 0.35 +
         heuristic_trust * 0.2 +
@@ -159,7 +169,10 @@ def _combine_trust(result: dict) -> int:
         ssl_trust * 0.05 +
         dns_trust * 0.05
     )
-    return round(score)
+    score = round(score)
+    if clean_reputation:
+        score = max(score, 80)
+    return score
 
 
 _load_tranco()

@@ -426,13 +426,21 @@ def _collect_threat_intel(future) -> dict:
         }
 
 
-def _apply_threat_intel(score: int, verdict: str, reasons: list[dict], threat_intel: dict) -> tuple[int, str]:
+def _apply_threat_intel(
+    score: int,
+    verdict: str,
+    reasons: list[dict],
+    threat_intel: dict,
+    heuristic_score: int,
+    html_available: bool,
+) -> tuple[int, str]:
     """Blend external reputation into the existing local/ML score."""
     if not threat_intel.get("available"):
         return score, verdict
 
     flagged_by = threat_intel.get("flagged_by", [])
     threat_score = int(threat_intel.get("threat_score") or 0)
+    apis_checked = int(threat_intel.get("apis_checked") or 0)
 
     if flagged_by:
         label = ", ".join(flagged_by[:3])
@@ -452,9 +460,27 @@ def _apply_threat_intel(score: int, verdict: str, reasons: list[dict], threat_in
         blended = max(score, round(score * 0.75 + threat_score * 0.25))
         return blended, "suspect" if blended > 40 and verdict == "safe" else verdict
 
-    if threat_intel.get("apis_checked", 0) > 0:
+    if apis_checked >= 3 and score >= 66 and heuristic_score <= 10 and threat_score <= 35:
         reasons.append({
-            "text": f"External reputation sources checked ({threat_intel.get('apis_checked')})",
+            "text": f"External reputation sources found no malicious listing ({apis_checked} checked)",
+            "points": -35,
+            "severity": "safe",
+        })
+        adjusted = 25 if html_available else 35
+        return min(score, adjusted), "safe"
+
+    if apis_checked >= 3 and score > 40 and heuristic_score <= 20 and threat_score <= 35:
+        reasons.append({
+            "text": f"External reputation sources reduce the risk ({apis_checked} checked)",
+            "points": -20,
+            "severity": "safe",
+        })
+        adjusted = max(20, round(score * 0.55))
+        return adjusted, "safe" if adjusted <= 40 else "suspect"
+
+    if apis_checked > 0:
+        reasons.append({
+            "text": f"External reputation sources checked ({apis_checked})",
             "points": 0,
             "severity": "safe",
         })
@@ -513,7 +539,15 @@ def analyze_url(url: str) -> dict:
         dns_info = _dns_reputation(hostname)
     if ml is not None:
         # IA prioritaire : moins strict sur les zones grises
-        if ml < 25:
+        if html is None and h_score <= 10 and ml >= 75:
+            score = 45
+            verdict = "suspect"
+            reasons.append({
+                "text": "ML risk reduced because page content could not be fetched and local indicators are weak",
+                "points": -30,
+                "severity": "info",
+            })
+        elif ml < 25:
             score = max(5, round(0.88 * ml + 0.12 * h_score))
             verdict = "safe"
         elif ml > 75:
@@ -530,12 +564,15 @@ def analyze_url(url: str) -> dict:
                 hostname, verdict, score, (time.monotonic() - t0) * 1000)
 
     threat_intel = _collect_threat_intel(threat_future)
-    score, verdict = _apply_threat_intel(score, verdict, reasons, threat_intel)
+    score, verdict = _apply_threat_intel(score, verdict, reasons, threat_intel, h_score, html is not None)
+
+    logger.info("[analyzer] final %s -> %s %d/100 (%.0fms)",
+                hostname, verdict, score, (time.monotonic() - t0) * 1000)
 
     screenshot_path = None
 
     # 5. Screenshot async (uniquement si suspect/dangereux)
-    if verdict in ("suspect", "dangerous"):
+    if verdict == "dangerous" or (verdict == "suspect" and score >= 55):
         try:
             safe_name = _RE_SAFE_NAME.sub("_", hostname)[:40]
             take_screenshot_async(full_url, safe_name)
