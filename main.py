@@ -14,6 +14,7 @@ from functools import lru_cache
 import pandas as pd
 from flask import Flask, abort, jsonify, render_template, request, send_file
 from flask_limiter import Limiter
+from flask_cors import CORS
 
 
 def _load_dotenv(path: str = ".env") -> None:
@@ -49,6 +50,8 @@ logger = logging.getLogger("linkcheck.main")
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-only-change-me")
+
+CORS(app, resources={r"/analyze": {"origins": "*"}})  # Sécuriser la route /analyze avec CORS
 
 def _rate_key() -> str:
     """
@@ -186,11 +189,10 @@ def index():
     return render_template("index.html")
 
 
-@app.post("/analyze")
-@limiter.limit("30 per minute")
-def analyze():
+@app.post("/api/analyze")
+def api_analyze():
     """
-    Analyze a URL for phishing/fraud indicators.
+    Developer API: analyze a URL and return structured JSON.
     
     Request body:
     {
@@ -198,21 +200,20 @@ def analyze():
     }
     
     Returns:
-        JSON with analysis results (score, verdict, reasons, etc.)
+    JSON with detailed analysis (score, verdict, reasons, etc.)
     """
-    ip = _rate_key()
     body = request.get_json(silent=True) or {}
     url = str(body.get("url", "")).strip()
 
     if not url:
-        return jsonify({"error": "Empty URL"}), 400
+        return jsonify({"error": "Missing URL", "code": "MISSING_URL"}), 400
     if len(url) > 2000:
-        return jsonify({"error": "URL too long (max 2000 chars)"}), 400
+        return jsonify({"error": "URL too long (max 2000 characters)", "code": "URL_TOO_LONG"}), 400
 
-    logger.info("[main] %s → %s", ip, url[:80])
+    logger.info("[api] %s → %s", _rate_key(), url[:80])
     result = analyze_url(url)
 
-    # Enrichissement Tranco (IA + Réputation)
+    # Tranco enrichment
     domain = result.get("analyzed_host", "")
     rank = _REPUTATION.get(domain) or _REPUTATION.get(".".join(domain.split(".")[-2:]))
 
@@ -223,19 +224,19 @@ def analyze():
             result["verdict"] = "safe" if result["score"] <= 40 else result["verdict"]
             result["is_phishing"] = result["verdict"] != "safe"
             result["reasons"].insert(0, {
-                "text": f"Highly popular site (Tranco #{rank}) - trust boosted",
+                "text": f"Site très populaire (Tranco #{rank}) - confiance boostée",
                 "points": -25, "severity": "safe",
             })
         elif rank <= 10_000:
             result["score"] = max(0, round(result["score"] * 0.8))
             result["reasons"].insert(0, {
-                "text": f"Popular site (Tranco #{rank}) - trust adjusted",
+                "text": f"Site populaire (Tranco #{rank}) - confiance ajustée",
                 "points": -20, "severity": "safe",
             })
         elif rank <= 100_000:
             result["score"] = max(0, round(result["score"] * 0.9))
             result["reasons"].insert(0, {
-                "text": f"Known site (Tranco #{rank})",
+                "text": f"Site connu (Tranco #{rank})",
                 "points": -10, "severity": "info",
             })
         elif rank <= 800_000:
@@ -246,7 +247,7 @@ def analyze():
             })
         else:
             result["reasons"].append({
-                "text": f"High Tranco rank (#{rank}) - weak reputation",
+                "text": f"Rang Tranco élevé (#{rank}) - réputation faible",
                 "points": 0, "severity": "info",
             })
         result["tranco_score"] = _tranco_score(rank)
@@ -356,7 +357,7 @@ def feedback():
     body = request.get_json(silent=True) or {}
     url = str(body.get("url", "")).strip()
     if not url:
-        return jsonify({"error": "URL manquante"}), 400
+        return jsonify({"error": "Missing URL", "code": "MISSING_URL"}), 400
 
     analyzed_host = str(body.get("analyzed_host", "")).strip()
     verdict = str(body.get("verdict", "")).strip()

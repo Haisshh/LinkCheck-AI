@@ -31,7 +31,7 @@ except Exception as e:
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger("linkcheck.analyzer")
 
-# ── ML Model ─────────────────────────────────────────────────────────────
+# ML Model 
 
 _model: Optional[object]    = None
 _feat_names: Optional[list] = None
@@ -51,13 +51,13 @@ THREAT_INTEL_ENABLED = os.environ.get("LINKCHECK_THREAT_INTEL", "true").lower() 
 }
 THREAT_INTEL_WAIT_SECONDS = float(os.environ.get("LINKCHECK_THREAT_INTEL_WAIT", "2.5"))
 
-# ── Constantes ───────────────────────────────────────────────────────────
+# Constantes 
 
 # Whitelist: root domains only (hierarchical matching enabled)
 # Subdomains automatically covered: e.g., xbox.com → support.xbox.com, mail.xbox.com, etc.
 TRUSTED_DOMAINS: frozenset[str] = frozenset({
 
-    # --- Big Tech ---
+    # Big Tech 
     "google.com", "youtube.com", "gmail.com", "googleapis.com",
     "microsoft.com", "live.com", "outlook.com", "office.com",
     "apple.com", "icloud.com",
@@ -66,7 +66,7 @@ TRUSTED_DOMAINS: frozenset[str] = frozenset({
     "x.com", "twitter.com",
     "linkedin.com",
 
-    # --- Dev / Tech ---
+    # Dev / Tech 
     "github.com", "gitlab.com", "bitbucket.org",
     "stackoverflow.com", "stackexchange.com",
     "docker.com", "kubernetes.io",
@@ -74,56 +74,56 @@ TRUSTED_DOMAINS: frozenset[str] = frozenset({
     "vercel.com", "netlify.com",
     "cloudflare.com",
 
-    # --- Streaming ---
+    # Streaming 
     "netflix.com", "spotify.com", "twitch.tv",
     "disneyplus.com", "primevideo.com",
 
-    # --- E-commerce ---
+    # E-commerce 
     "amazon.com", "ebay.com", "aliexpress.com",
     "cdiscount.com", "fnac.com", "darty.com",
     "vinted.com", "leboncoin.fr",
 
-    # --- Paiement / Banque ---
+    # Paiement / Banque 
     "paypal.com", "stripe.com",
     "wise.com", "revolut.com",
     "visa.com", "mastercard.com",
 
-    # --- Banques FR ---
+    # Banques FR
     "credit-agricole.fr", "societegenerale.fr",
     "bnpparibas.fr", "labanquepostale.fr",
     "caissedepargne.fr", "banquepopulaire.fr",
 
-    # --- Livraison ---
+    # Livraison 
     "dhl.com", "fedex.com", "ups.com",
     "chronopost.fr", "colissimo.fr", "laposte.fr",
 
-    # --- Sécurité / Open source ---
+    # Sécurité / Open source 
     "mozilla.org", "apache.org", "linux.org",
     "ubuntu.com", "debian.org", "redhat.com",
     "kali.org", "archlinux.org",
 
-    # --- Éducation ---
+    # Éducation 
     "wikipedia.org", "coursera.org", "edx.org",
     "openclassrooms.com", "khanacademy.org",
 
-    # --- Communication ---
+    # Communication 
     "discord.com", "slack.com", "zoom.us",
     "skype.com", "teams.microsoft.com",
 
-    # --- Cloud / SaaS ---
+    # Cloud / SaaS 
     "dropbox.com", "box.com",
     "notion.so", "airtable.com",
 
-    # --- Jeux ---
+    # Jeux 
     "steampowered.com", "epicgames.com",
     "riotgames.com", "blizzard.com",
     "playstation.com", "xbox.com",
 
-    # --- Médias ---
+    # Médias
     "bbc.com", "cnn.com", "lemonde.fr",
     "nytimes.com", "theguardian.com",
 
-    # --- Gouvernement (exemples) ---
+    # Gouvernement
     "service-public.fr", "gouv.fr",
     "impots.gouv.fr", "ameli.fr",
 
@@ -174,7 +174,7 @@ def _get_session() -> requests.Session:
     return _SESSION
 
 
-# ── Whitelist helpers (hierarchical matching with caching) ───────────────
+# Whitelist helpers (hierarchical matching with caching) 
 
 def is_trusted(domain: str) -> bool:
     domain = domain.lower().strip()
@@ -232,7 +232,7 @@ def _is_whitelisted(hostname: str) -> bool:
     return root in TRUSTED_DOMAINS
 
 
-# ── HTML Fetch ──────────────────────────────────────────────────────────
+# HTML Fetch 
 
 def _fetch_html(url: str) -> Optional[str]:
     """Return the HTML of the URL or None. Detailed logs for each error type."""
@@ -273,7 +273,7 @@ def _fetch_html(url: str) -> Optional[str]:
     return None
 
 
-# ── Heuristic analysis ──────────────────────────────────────────────────
+# Heuristic analysis 
 
 @lru_cache(maxsize=512)
 def _ssl_analysis(hostname: str) -> dict:
@@ -439,7 +439,7 @@ def _heuristic(hostname: str, full_url: str, f: dict) -> tuple[int, list[dict], 
     return min(85, score), reasons, brand_spoofing
 
 
-# ── Score ML ────────────────────────────────────────────────────────────
+# Score ML 
 
 def _ml_score(f: dict) -> Optional[int]:
     """Calculate ML phishing score."""
@@ -456,7 +456,7 @@ def _ml_score(f: dict) -> Optional[int]:
         return None
 
 
-# ── Feature cache ───────────────────────────────────────────────────────
+# Feature cache
 
 @lru_cache(maxsize=1024)
 def _cached_extract_features(url: str, html_hash: int, html_content: Optional[str]) -> dict:
@@ -464,7 +464,7 @@ def _cached_extract_features(url: str, html_hash: int, html_content: Optional[st
     return extract_features(url, html_content)
 
 
-# ── Entry point ─────────────────────────────────────────────────────────
+# Entry point
 
 _RE_SAFE_NAME = re.compile(r'[^a-zA-Z0-9]')
 

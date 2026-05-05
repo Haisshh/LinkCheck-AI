@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LinkCheck — Analyse de liens</title>
+  <title>LinkCheck — URL analysis</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
@@ -12,7 +12,6 @@
 <body>
 <div class="layout">
 
-  <!-- BARRE DE NAVIGATION -->
   <header class="topbar">
     <div class="brand">
       <svg class="brand-icon" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -24,88 +23,272 @@
       <span class="brand-name">LinkCheck</span>
       <span class="brand-version">v1.1</span>
     </div>
-    <div class="status-badge">
-      <span class="status-dot" aria-hidden="true"></span>
-      Moteur actif
+    <div class="topbar-right">
+      <div class="lang-switch" role="group" aria-label="Language selector">
+        <button id="langEnBtn" class="lang-btn active" onclick="setLanguage('en')">EN</button>
+        <button id="langFrBtn" class="lang-btn" onclick="setLanguage('fr')">FR</button>
+      </div>
+      <button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark/light mode">
+        <svg class="theme-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <div id="statusBadge" class="status-badge">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="statusBadgeText">Engine active</span>
+      </div>
     </div>
   </header>
 
-  <!-- CONTENU PRINCIPAL -->
   <main class="main">
 
-    <!-- Formulaire -->
+    <section class="help-section">
+      <details class="help-details">
+        <summary class="help-summary" data-i18n="helpSummary">How to use LinkCheck?</summary>
+        <div class="help-content">
+          <p data-i18n="helpUrl"><strong>Analyze a URL:</strong> Paste the suspicious URL into the field below and click "Analyze".</p>
+          <p data-i18n="helpScore"><strong>Understand the score:</strong> 0-30 = safe, 31-60 = suspicious, 61+ = dangerous.</p>
+          <p data-i18n="helpReport"><strong>Detailed report:</strong> Each rule explains why the URL is classified that way.</p>
+          <p data-i18n="helpExamples"><strong>Examples:</strong> Click the buttons to test common scenarios.</p>
+          <p data-i18n="helpFeedback"><strong>Feedback:</strong> If you think a result is wrong, report it to improve the scanner.</p>
+        </div>
+      </details>
+    </section>
+
     <section class="input-section">
-      <p class="field-label">URL à analyser</p>
+      <p id="fieldLabel" class="field-label" data-i18n="urlLabel">URL to analyze</p>
       <div class="input-row">
         <input
           type="text"
           id="urlInput"
           class="url-input"
-          placeholder="https://exemple.com/page?action=login"
+          placeholder="https://example.com/page?action=login"
           autocomplete="off"
           spellcheck="false"
-          aria-label="URL à analyser"
+          list="urlSuggestions"
+          aria-label="URL to analyze"
         />
-        <button id="analyzeBtn" class="btn-scan" onclick="runAnalysis()">Analyser</button>
+        <datalist id="urlSuggestions">
+          <option value="https://google.com">
+          <option value="https://github.com">
+          <option value="https://stackoverflow.com">
+          <option value="https://wikipedia.org">
+          <option value="https://paypal.com">
+          <option value="https://amazon.com">
+          <option value="https://facebook.com">
+          <option value="https://twitter.com">
+          <option value="https://youtube.com">
+        </datalist>
+        <button id="clearBtn" class="btn-clear" onclick="clearInput()" aria-label="Clear URL">✕</button>
+        <button id="analyzeBtn" class="btn-scan" onclick="runAnalysis()" data-i18n="analyzeButton">Analyze</button>
       </div>
       <div class="presets">
-        <span class="presets-label">Scénarios de test :</span>
-        <button class="preset-chip" onclick="setUrl('https://google.com')">google.com</button>
-        <button class="preset-chip" onclick="setUrl('http://amaz0n-secure.login.account-verify.com/update?urgent=true')">amaz0n phishing</button>
-        <button class="preset-chip" onclick="setUrl('http://bit.ly/3xKp2aB')">raccourcisseur</button>
-        <button class="preset-chip" onclick="setUrl('https://paypa1.secure-account-login-verify.com/update')">paypal usurpation</button>
-        <button class="preset-chip" onclick="setUrl('https://secure.login.bank.fake-support.com/verify-account')">multi-sous-domaines</button>
+        <span class="presets-label" data-i18n="presetLabel">Example cases:</span>
+        <button class="preset-chip" onclick="setUrl('https://google.com')" title="Safe popular site, expected low score">google.com (safe)</button>
+        <button class="preset-chip" onclick="setUrl('http://amaz0n-secure.login.account-verify.com/update?urgent=true')" title="Phishing-style URL with homoglyph and suspicious subdomains">amaz0n phishing (dangerous)</button>
+        <button class="preset-chip" onclick="setUrl('http://bit.ly/3xKp2aB')" title="Shortened URL hiding the real destination">shortener (suspicious)</button>
+        <button class="preset-chip" onclick="setUrl('https://paypa1.secure-account-login-verify.com/update')" title="Brand impersonation using homoglyph">paypal impersonation (dangerous)</button>
+        <button class="preset-chip" onclick="setUrl('https://secure.login.bank.fake-support.com/verify-account')" title="Multiple suspicious subdomains mimicking a bank">multi-subdomain (suspicious)</button>
       </div>
     </section>
 
-    <!-- Résultat (injecté par JS) -->
     <section id="resultSection" aria-live="polite"></section>
-
-    <!-- Historique (injecté par JS) -->
     <section id="historySection"></section>
 
   </main>
 
-  <!-- PIED DE PAGE -->
   <footer class="footer">
-    <span>LinkCheck — Outil pédagogique de cybersécurité.</span>
-    <span>Ne remplace pas une solution de sécurité professionnelle.</span>
+    <span data-i18n="footerLine1">LinkCheck — cybersecurity awareness tool.</span>
+    <span data-i18n="footerLine2">Not a replacement for professional security services.</span>
   </footer>
 
 </div>
 
 <script>
-  // ── État global ────────────────────────────────────────────────
   let sessionHistory = [];
   let lastResult = null;
+  let currentLang = 'en';
 
-  // ── Sécurité : échapper le HTML pour éviter les injections XSS ─
-  // Si une URL malveillante contient du HTML, cette fonction l'échappe
+  const translations = {
+    en: {
+      lang: 'en',
+      pageTitle: 'LinkCheck — URL analysis',
+      statusBadge: 'Engine active',
+      helpSummary: 'How to use LinkCheck?',
+      helpUrl: '<strong>Analyze a URL:</strong> Paste the suspicious URL into the field below and click "Analyze".',
+      helpScore: '<strong>Understand the score:</strong> 0-30 = safe, 31-60 = suspicious, 61+ = dangerous.',
+      helpReport: '<strong>Detailed report:</strong> Each rule explains why the URL is classified that way.',
+      helpExamples: '<strong>Examples:</strong> Click the buttons to test common scenarios.',
+      helpFeedback: '<strong>Feedback:</strong> If you think a result is wrong, report it to improve the scanner.',
+      urlLabel: 'URL to analyze',
+      analyzeButton: 'Analyze',
+      clearButton: 'Clear',
+      presetLabel: 'Example cases:',
+      footerLine1: 'LinkCheck — cybersecurity awareness tool.',
+      footerLine2: 'Not a replacement for professional security services.',
+      resultHeader: 'Analysis results',
+      screenshotLabel: 'Visual preview (sandbox)',
+      copyButton: 'Copy report',
+      copyButtonCopied: 'Copied',
+      falsePositive: 'False positive?',
+      reportDiscord: 'Report to Discord',
+      feedbackNote: 'Send this link to Discord for manual review.',
+      feedbackPlaceholder: 'Optional comment (e.g. this site is safe)',
+      feedbackSubmit: 'Send report',
+      feedbackSent: 'Feedback sent',
+      feedbackError: 'Send failed',
+      historyTitle: 'Session history',
+      historyEmpty: 'No history yet.',
+      errorPrefix: 'Error:',
+      verdictLabels: {
+        safe: 'No threats detected',
+        suspect: 'Suspicious indicators',
+        dangerous: 'High-risk link',
+        error: 'Invalid URL',
+      },
+      barTicks: ['0', 'Safe ≤ 30', 'Suspicious ≤ 60', '100'],
+      rulesLabel: 'rule(s)',
+      copyReportHeader: 'LINKCHECK — ANALYSIS REPORT',
+      copyReportDetail: 'DETAILS',
+      copyReportDate: 'Date',
+      copyReportScore: 'Score',
+      copyReportVerdict: 'Verdict',
+      historyBadges: { safe: 'Safe', suspect: 'Suspicious', dangerous: 'Dangerous' },
+      urlPlaceholder: 'https://example.com/page?action=login'
+    },
+    fr: {
+      lang: 'fr',
+      pageTitle: 'LinkCheck — Analyse de liens',
+      statusBadge: 'Moteur actif',
+      helpSummary: 'Comment utiliser LinkCheck ?',
+      helpUrl: '<strong>Analyser une URL :</strong> Collez l\'URL suspecte dans le champ ci-dessous et cliquez sur "Analyser".',
+      helpScore: '<strong>Comprendre le score :</strong> 0-30 = sûr, 31-60 = suspect, 61+ = dangereux.',
+      helpReport: '<strong>Rapport détaillé :</strong> Chaque règle explique pourquoi l\'URL est classée ainsi.',
+      helpExamples: '<strong>Exemples :</strong> Cliquez sur les boutons pour tester des scénarios courants.',
+      helpFeedback: '<strong>Feedback :</strong> Si vous pensez qu\'une analyse est fausse, signalez-la pour amélioration.',
+      urlLabel: 'URL à analyser',
+      analyzeButton: 'Analyser',
+      clearButton: 'Effacer',
+      presetLabel: 'Exemples de test :',
+      footerLine1: 'LinkCheck — Outil pédagogique de cybersécurité.',
+      footerLine2: 'Ne remplace pas une solution de sécurité professionnelle.',
+      resultHeader: 'Résultats de l\'analyse',
+      screenshotLabel: 'Aperçu visuel (Sandbox)',
+      copyButton: 'Copier le rapport',
+      copyButtonCopied: 'Copié',
+      falsePositive: 'Faux positif ?',
+      reportDiscord: 'Signaler au Discord',
+      feedbackNote: 'Envoie ce lien au salon Discord pour vérification manuelle.',
+      feedbackPlaceholder: 'Commentaire facultatif (ex: site sûr selon moi)',
+      feedbackSubmit: 'Envoyer le signalement',
+      feedbackSent: 'Feedback envoyé',
+      feedbackError: 'Erreur d\'envoi',
+      historyTitle: 'Historique de session',
+      historyEmpty: 'Aucun historique.',
+      errorPrefix: 'Erreur :',
+      verdictLabels: {
+        safe: 'Aucune menace détectée',
+        suspect: 'Indicateurs suspects',
+        dangerous: 'Lien à haut risque',
+        error: 'URL invalide',
+      },
+      barTicks: ['0', 'Sûr ≤ 30', 'Suspect ≤ 60', '100'],
+      rulesLabel: 'règle(s)',
+      copyReportHeader: 'LINKCHECK — RAPPORT D\'ANALYSE',
+      copyReportDetail: 'DÉTAIL DES RÈGLES',
+      copyReportDate: 'Date',
+      copyReportScore: 'Score',
+      copyReportVerdict: 'Verdict',
+      historyBadges: { safe: 'Sûre', suspect: 'Suspecte', dangerous: 'Dangereuse' },
+      urlPlaceholder: 'https://exemple.com/page?action=login'
+    }
+  };
+
+  function setLanguage(lang) {
+    if (!translations[lang]) return;
+    currentLang = lang;
+    document.documentElement.setAttribute('lang', translations[lang].lang);
+    localStorage.setItem('siteLanguage', lang);
+
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      const key = el.getAttribute('data-i18n');
+      if (key && translations[lang][key] !== undefined) {
+        el.innerHTML = translations[lang][key];
+      }
+    });
+
+    document.getElementById('urlInput').placeholder = translations[lang].urlPlaceholder;
+    document.getElementById('urlInput').setAttribute('aria-label', translations[lang].urlLabel);
+    document.getElementById('statusBadgeText').textContent = translations[lang].statusBadge;
+    document.getElementById('analyzeBtn').textContent = translations[lang].analyzeButton;
+    document.getElementById('clearBtn').setAttribute('aria-label', translations[lang].clearButton);
+
+    document.getElementById('langEnBtn').classList.toggle('active', lang === 'en');
+    document.getElementById('langFrBtn').classList.toggle('active', lang === 'fr');
+    document.title = translations[lang].pageTitle;
+    updateStaticTexts();
+    if (lastResult) renderResult(lastResult, lastResult.inputUrl);
+    renderHistory();
+  }
+
+  function updateStaticTexts() {
+    const presetLabels = currentLang === 'en'
+      ? ['google.com (safe)', 'amaz0n phishing (dangerous)', 'shortener (suspicious)', 'paypal impersonation (dangerous)', 'multi-subdomain (suspicious)']
+      : ['google.com (sûr)', 'amaz0n phishing (dangereux)', 'raccourcisseur (suspect)', 'paypal usurpation (dangereux)', 'multi-sous-domaines (suspect)'];
+
+    document.querySelectorAll('.preset-chip').forEach((btn, idx) => {
+      btn.textContent = presetLabels[idx];
+    });
+  }
+
+  function updateThemeIcon() {
+    const theme = document.documentElement.getAttribute('data-theme') || 'light';
+    const icon = document.querySelector('.theme-icon');
+    if (icon) {
+      icon.innerHTML = theme === 'dark'
+        ? '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+        : '<path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+    }
+  }
+
+  function toggleTheme() {
+    const html = document.documentElement;
+    const currentTheme = html.getAttribute('data-theme') || 'light';
+    const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+    html.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    updateThemeIcon();
+  }
+
   function escapeHtml(text) {
     return String(text).replace(/[&<>"']/g, m => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
     }[m]));
   }
 
-  // ── Remplir le champ et lancer l'analyse ──────────────────────
   function setUrl(url) {
     document.getElementById('urlInput').value = url;
     runAnalysis();
   }
 
+  function clearInput() {
+    document.getElementById('urlInput').value = '';
+    document.getElementById('urlInput').focus();
+  }
+
   function currentTime() {
-    return new Date().toLocaleTimeString('fr-FR', {
+    const locale = currentLang === 'fr' ? 'fr-FR' : 'en-US';
+    return new Date().toLocaleTimeString(locale, {
       hour: '2-digit', minute: '2-digit', second: '2-digit'
     });
   }
 
-  // ── Analyse principale ─────────────────────────────────────────
   async function runAnalysis() {
     const input = document.getElementById('urlInput').value.trim();
     if (!input) return;
 
     const btn = document.getElementById('analyzeBtn');
-    btn.textContent = 'Analyse…';
+    btn.textContent = translations[currentLang].analyzeButton + '…';
     btn.disabled = true;
 
     try {
@@ -117,44 +300,27 @@
 
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || 'Erreur serveur ' + res.status);
+        throw new Error(err.error || translations[currentLang].errorPrefix + ' ' + res.status);
       }
 
-      // CORRECTION : Flask retourne l'objet directement,
-      // pas enveloppé dans { data: ... }
       const data = await res.json();
-
       lastResult = { ...data, inputUrl: input };
       renderResult(data, input);
-
       sessionHistory.unshift({ url: input, ...data });
       if (sessionHistory.length > 8) sessionHistory.pop();
       renderHistory();
-
     } catch (err) {
       document.getElementById('resultSection').innerHTML =
-        `<div class="error-banner">Erreur : ${escapeHtml(err.message)}</div>`;
+        `<div class="error-banner">${translations[currentLang].errorPrefix} ${escapeHtml(err.message)}</div>`;
     } finally {
-      btn.textContent = 'Analyser';
+      btn.textContent = translations[currentLang].analyzeButton;
       btn.disabled = false;
     }
   }
 
-  // ── Rendu du résultat ─────────────────────────────────────────
-  // ── Rendu du résultat ─────────────────────────────────────────
   function renderResult(data, rawUrl) {
-    const verdictLabels = {
-      safe:      'Aucune menace détectée',
-      suspect:   'Indicateurs suspects',
-      dangerous: 'Lien à haut risque',
-      error:     'URL invalide'
-    };
-    const sevMap = {
-      danger: 'HIGH',
-      warn:   'MED',
-      info:   'LOW',
-      safe:   'INFO'
-    };
+    const verdictLabels = translations[currentLang].verdictLabels;
+    const sevMap = { danger: 'HIGH', warn: 'MED', info: 'LOW', safe: 'INFO' };
 
     const findingsHtml = (data.reasons || []).map(r => `
       <div class="finding">
@@ -163,18 +329,17 @@
         <span class="finding-pts">${r.points > 0 ? '+' + r.points : ''}</span>
       </div>`).join('');
 
-    // --- NOUVEAU : Bloc Capture d'écran ---
     let screenshotHtml = '';
     if (data.screenshot) {
       screenshotHtml = `
         <div class="screenshot-area">
-          <div class="field-label" style="margin-bottom:12px">Aperçu visuel (Sandbox)</div>
+          <div class="field-label" style="margin-bottom:12px">${translations[currentLang].screenshotLabel}</div>
           <div class="screenshot-frame">
             <img
               src="/${data.screenshot}?t=${Date.now()}"
               data-screenshot-path="${escapeHtml(data.screenshot)}"
               data-retry-count="0"
-              alt="Capture d'écran du site"
+              alt="Screenshot of site"
               class="screenshot-img"
               onerror="retryScreenshot(this)"
             >
@@ -184,18 +349,17 @@
     }
 
     const mlHtml = data.ml_score !== undefined
-      ? `<span class="result-time" style="margin-right:auto">Score ML : ${data.ml_score}/100</span>`
+      ? `<span class="result-time" style="margin-right:auto">ML score: ${data.ml_score}/100</span>`
       : '';
 
     document.getElementById('resultSection').innerHTML = `
       <div class="result-card verdict-${escapeHtml(data.verdict)}">
-
         <div class="result-head">
           <div class="result-meta">
             <div class="result-host">${escapeHtml(data.analyzed_host || rawUrl)}</div>
             <div class="result-verdict-row">
               <span class="verdict-dot"></span>
-              <span class="verdict-text">${escapeHtml(verdictLabels[data.verdict] || 'Inconnu')}</span>
+              <span class="verdict-text">${escapeHtml(verdictLabels[data.verdict] || 'Unknown')}</span>
             </div>
           </div>
           <div class="score-block">
@@ -203,51 +367,48 @@
             <span class="score-denom">/ 100</span>
           </div>
         </div>
-
         <div class="bar-wrap">
           <div class="bar-track"><div class="bar-fill" id="scoreBar"></div></div>
           <div class="bar-ticks">
-            <span>0</span><span>Sûr ≤ 30</span><span>Suspect ≤ 60</span><span>100</span>
+            <span>${translations[currentLang].barTicks[0]}</span>
+            <span>${translations[currentLang].barTicks[1]}</span>
+            <span>${translations[currentLang].barTicks[2]}</span>
+            <span>${translations[currentLang].barTicks[3]}</span>
           </div>
         </div>
-
         <div class="findings">
           <div class="findings-header">
-            <span class="field-label" style="margin:0">Résultats de l'analyse</span>
-            <span class="findings-count">${(data.reasons || []).length} règle(s)</span>
+            <span class="field-label" style="margin:0">${translations[currentLang].resultHeader}</span>
+            <span class="findings-count">${(data.reasons || []).length} ${translations[currentLang].rulesLabel}</span>
           </div>
           <div class="findings-list">${findingsHtml}</div>
         </div>
-
         ${screenshotHtml}
-
         <div class="result-footer">
           <button class="btn-copy" onclick="copyResult()">
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
               <rect x=".5" y="3.5" width="8" height="8" rx="1.5" stroke="currentColor"/>
               <path d="M3.5 3V2.5A1.5 1.5 0 0 1 5 1h4.5A1.5 1.5 0 0 1 11 2.5V7A1.5 1.5 0 0 1 9.5 8.5H9" stroke="currentColor" stroke-linecap="round"/>
             </svg>
-            Copier le rapport
+            ${translations[currentLang].copyButton}
           </button>
           ${mlHtml}
           <span class="result-time">${currentTime()}</span>
         </div>
-
         <div class="feedback-card">
           <div class="feedback-top">
-            <span class="feedback-label">Faux positif ?</span>
-            <button class="btn-feedback" onclick="toggleFeedbackForm()">Signaler au Discord</button>
+            <span class="feedback-label">${translations[currentLang].falsePositive}</span>
+            <button class="btn-feedback" onclick="toggleFeedbackForm()">${translations[currentLang].reportDiscord}</button>
           </div>
           <div id="feedbackBox" class="feedback-panel hidden">
-            <p class="feedback-note">Envoie ce lien au salon Discord pour vérification manuelle.</p>
-            <textarea id="feedbackComment" class="feedback-textarea" placeholder="Commentaire facultatif (ex: site sûr selon moi)"></textarea>
+            <p class="feedback-note">${translations[currentLang].feedbackNote}</p>
+            <textarea id="feedbackComment" class="feedback-textarea" placeholder="${translations[currentLang].feedbackPlaceholder}"></textarea>
             <div class="feedback-actions">
-              <button class="btn-feedback-submit" onclick="sendFeedback()">Envoyer le signalement</button>
+              <button class="btn-feedback-submit" onclick="sendFeedback()">${translations[currentLang].feedbackSubmit}</button>
               <span id="feedbackStatus" class="feedback-status"></span>
             </div>
           </div>
         </div>
-
       </div>`;
 
     setTimeout(() => {
@@ -270,27 +431,24 @@
     }, 2000);
   }
 
-  // ── Copier le rapport ─────────────────────────────────────────
   function copyResult() {
     if (!lastResult) return;
-    const vMap = { safe: 'SÛRE', suspect: 'SUSPECTE', dangerous: 'DANGEREUSE' };
+    const vMap = translations[currentLang].historyBadges;
     const lines = [
-      'LINKCHECK — RAPPORT D\'ANALYSE',
+      translations[currentLang].copyReportHeader,
       '─'.repeat(40),
-      `URL      : ${lastResult.inputUrl}`,
-      `Score    : ${lastResult.score}/100`,
-      `Verdict  : ${vMap[lastResult.verdict] || lastResult.verdict.toUpperCase()}`,
-      `Date     : ${new Date().toLocaleString('fr-FR')}`,
+      `${translations[currentLang].copyReportScore} : ${lastResult.score}/100`,
+      `${translations[currentLang].copyReportVerdict} : ${vMap[lastResult.verdict] || lastResult.verdict.toUpperCase()}`,
+      `${translations[currentLang].copyReportDate} : ${new Date().toLocaleString(currentLang === 'fr' ? 'fr-FR' : 'en-US')}`,
       '',
-      'DÉTAIL DES RÈGLES :',
-      ...(lastResult.reasons || []).map(r =>
-        `  · ${r.text}${r.points > 0 ? ' (+' + r.points + ' pts)' : ''}`)
+      `${translations[currentLang].copyReportDetail} :`,
+      ...(lastResult.reasons || []).map(r => `  · ${r.text}${r.points > 0 ? ' (+' + r.points + ' pts)' : ''}`)
     ];
     navigator.clipboard.writeText(lines.join('\n')).then(() => {
       const btn = document.querySelector('.btn-copy');
       if (btn) {
-        btn.textContent = 'Copié';
-        setTimeout(() => btn.textContent = 'Copier le rapport', 1800);
+        btn.textContent = translations[currentLang].copyButtonCopied;
+        setTimeout(() => btn.textContent = translations[currentLang].copyButton, 1800);
       }
     });
   }
@@ -308,9 +466,9 @@
     const button = document.querySelector('.btn-feedback-submit');
     if (button) {
       button.disabled = true;
-      button.textContent = 'Envoi…';
+      button.textContent = translations[currentLang].feedbackSubmit + '…';
     }
-    if (status) status.textContent = 'Envoi en cours...';
+    if (status) status.textContent = translations[currentLang].feedbackNote;
 
     try {
       const res = await fetch('/feedback', {
@@ -325,29 +483,30 @@
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || 'Impossible d\'envoyer le feedback');
-      if (status) status.textContent = 'Feedback envoyé 👍';
-      if (button) button.textContent = 'Envoyé';
+      if (!res.ok) throw new Error(data.error || data.message || translations[currentLang].feedbackError);
+      if (status) status.textContent = translations[currentLang].feedbackSent;
+      if (button) button.textContent = translations[currentLang].feedbackSubmit;
       setTimeout(() => {
         if (status) status.textContent = '';
-        if (button) button.textContent = 'Envoyer le signalement';
       }, 3000);
     } catch (err) {
-      if (status) status.textContent = err.message || 'Erreur d\'envoi';
+      if (status) status.textContent = err.message || translations[currentLang].feedbackError;
     } finally {
       if (button) button.disabled = false;
     }
   }
 
-  // ── Historique de session ─────────────────────────────────────
   function renderHistory() {
     const section = document.getElementById('historySection');
-    if (!sessionHistory.length) { section.innerHTML = ''; return; }
+    if (!sessionHistory.length) {
+      section.innerHTML = `<div class="history-wrap"><p class="field-label">${translations[currentLang].historyEmpty}</p></div>`;
+      return;
+    }
 
-    const lMap = { safe: 'Sûre', suspect: 'Suspecte', dangerous: 'Dangereuse' };
+    const lMap = translations[currentLang].historyBadges;
     section.innerHTML = `
       <div class="history-wrap">
-        <p class="field-label">Historique de session</p>
+        <p class="field-label">${translations[currentLang].historyTitle}</p>
         <div class="history-list">
           ${sessionHistory.map(h => `
             <div class="history-row" onclick="setUrl('${escapeHtml(h.url)}')">
@@ -359,9 +518,17 @@
       </div>`;
   }
 
-  // Touche Entrée = lancer l'analyse
-  document.getElementById('urlInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') runAnalysis();
+  document.addEventListener('DOMContentLoaded', () => {
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    updateThemeIcon();
+
+    const savedLang = localStorage.getItem('siteLanguage') || 'en';
+    setLanguage(savedLang);
+
+    document.getElementById('urlInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') runAnalysis();
+    });
   });
 </script>
 </body>
