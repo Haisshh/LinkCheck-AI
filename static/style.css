@@ -12,7 +12,7 @@
   --radius:       8px;
   --radius-sm:    5px;
 
-  /* Couleurs sémantiques */
+  /* Semantic colors */
   --safe-bg:        #eaf3de;
   --safe-text:      #2d6b3a;
   --safe-bar:       #3d9a50;
@@ -28,7 +28,7 @@
   --danger-bar:     #c9352c;
   --danger-badge-bg:#f9d4d2;
 
-  /* Sévérité des règles */
+  /* Rule severity */
   --sev-high-bg:    #fce9e8;
   --sev-high-text:  #a8251d;
   --sev-med-bg:     #fef3e2;
@@ -72,7 +72,7 @@
   }
 }
 
-/* Forcer le thème sombre si data-theme="dark" */
+/* Force dark theme when data-theme="dark" */
 :root[data-theme="dark"] {
   --bg:           #111110;
   --surface:      #1b1b19;
@@ -115,7 +115,7 @@ body {
   min-height: 100vh;
 }
 
-/* ── Mise en page globale ─────────────────────────────────────── */
+/* ── Global layout ─────────────────────────────────────────── */
 .layout {
   max-width: 800px;
   margin: 0 auto;
@@ -345,7 +345,7 @@ body {
 .btn-scan:active  { opacity: .68; }
 .btn-scan:disabled { opacity: .35; cursor: not-allowed; }
 
-/* ── Puces de test ────────────────────────────────────────────── */
+/* ── Preset chips ───────────────────────────────────────────── */
 .presets {
   display: flex;
   flex-wrap: wrap;
@@ -376,7 +376,7 @@ body {
   background: var(--surface);
 }
 
-/* ── Carte résultat ───────────────────────────────────────────── */
+/* ── Result card ────────────────────────────────────────────── */
 .result-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -389,7 +389,7 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* En-tête résultat */
+/* Result header */
 .result-head {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -442,7 +442,7 @@ body {
   margin-top: 3px;
 }
 
-/* Couleurs par verdict */
+/* Verdict colors */
 .verdict-safe      .verdict-dot  { background: var(--safe-bar); }
 .verdict-safe      .verdict-text { color: var(--safe-text); }
 .verdict-safe      .score-number { color: var(--safe-text); }
@@ -453,7 +453,7 @@ body {
 .verdict-dangerous .verdict-text { color: var(--danger-text); }
 .verdict-dangerous .score-number { color: var(--danger-text); }
 
-/* Barre de progression */
+/* Progress bar */
 .bar-wrap {
   padding: .9rem 1.5rem .7rem;
   border-bottom: 1px solid var(--border-light);
@@ -486,7 +486,7 @@ body {
   color: var(--text-hint);
 }
 
-/* Détail des règles */
+/* Rule details */
 .findings { padding: 1.25rem 1.5rem; }
 .findings-header {
   display: flex;
@@ -536,7 +536,7 @@ body {
   padding-left: 8px;
 }
 
-/* Pied du panneau */
+/* Panel footer */
 .result-footer {
   display: flex;
   align-items: center;
@@ -638,7 +638,7 @@ body {
   color: var(--text-muted);
 }
 
-/* ── Bannière d'erreur ────────────────────────────────────────── */
+/* ── Error banner ─────────────────────────────────────────────── */
 .error-banner {
   padding: 1rem 1.25rem;
   border: 1px solid var(--border);
@@ -649,7 +649,7 @@ body {
   font-family: var(--mono);
 }
 
-/* ── Historique ───────────────────────────────────────────────── */
+/* ── History ─────────────────────────────────────────────────── */
 .history-wrap { margin-top: .5rem; }
 .history-list {
   border: 1px solid var(--border);
@@ -699,7 +699,7 @@ body {
   flex-shrink: 0;
 }
 
-/* ── Pied de page ─────────────────────────────────────────────── */
+/* ── Footer ─────────────────────────────────────────────────── */
 .footer {
   margin-top: 3rem;
   padding-top: 1.5rem;
@@ -719,7 +719,7 @@ body {
   .footer { flex-direction: column; gap: .4rem; }
 }
 
-/* ── Capture d'écran ────────────────────────────────────────── */
+/* ── Screenshot panel ───────────────────────────────────────── */
 .screenshot-area {
   padding: 0 1.5rem 1.5rem;
   border-top: 1px solid var(--border-light);
@@ -732,7 +732,7 @@ body {
   border-radius: var(--radius-sm);
   overflow: hidden;
   background: var(--bg);
-  line-height: 0; /* Évite un petit espace sous l'image */
+  line-height: 0; /* Avoid a small gap below the image */
 }
 
 .screenshot-img {
@@ -742,7 +742,7 @@ body {
   transition: transform 0.3s ease;
 }
 
-/* Petit effet zoom au survol */
+/* Small hover zoom effect */
 .screenshot-frame:hover .screenshot-img {
   transform: scale(1.02);
 }

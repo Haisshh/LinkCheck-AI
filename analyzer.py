@@ -51,13 +51,13 @@ THREAT_INTEL_ENABLED = os.environ.get("LINKCHECK_THREAT_INTEL", "true").lower() 
 }
 THREAT_INTEL_WAIT_SECONDS = float(os.environ.get("LINKCHECK_THREAT_INTEL_WAIT", "2.5"))
 
-# Constantes 
+# Constants
 
 # Whitelist: root domains only (hierarchical matching enabled)
 # Subdomains automatically covered: e.g., xbox.com → support.xbox.com, mail.xbox.com, etc.
 TRUSTED_DOMAINS: frozenset[str] = frozenset({
 
-    # Big Tech 
+    # Big Tech
     "google.com", "youtube.com", "gmail.com", "googleapis.com",
     "microsoft.com", "live.com", "outlook.com", "office.com",
     "apple.com", "icloud.com",
@@ -78,58 +78,58 @@ TRUSTED_DOMAINS: frozenset[str] = frozenset({
     "netflix.com", "spotify.com", "twitch.tv",
     "disneyplus.com", "primevideo.com",
 
-    # E-commerce 
+    # E-commerce
     "amazon.com", "ebay.com", "aliexpress.com",
     "cdiscount.com", "fnac.com", "darty.com",
     "vinted.com", "leboncoin.fr",
 
-    # Paiement / Banque 
+    # Payment / Banking
     "paypal.com", "stripe.com",
     "wise.com", "revolut.com",
     "visa.com", "mastercard.com",
 
-    # Banques FR
+    # French banks
     "credit-agricole.fr", "societegenerale.fr",
     "bnpparibas.fr", "labanquepostale.fr",
     "caissedepargne.fr", "banquepopulaire.fr",
 
-    # Livraison 
+    # Shipping
     "dhl.com", "fedex.com", "ups.com",
     "chronopost.fr", "colissimo.fr", "laposte.fr",
 
-    # Sécurité / Open source 
+    # Security / Open source
     "mozilla.org", "apache.org", "linux.org",
     "ubuntu.com", "debian.org", "redhat.com",
     "kali.org", "archlinux.org",
 
-    # Éducation 
+    # Education
     "wikipedia.org", "coursera.org", "edx.org",
     "openclassrooms.com", "khanacademy.org",
 
-    # Communication 
+    # Communication
     "discord.com", "slack.com", "zoom.us",
     "skype.com", "teams.microsoft.com",
 
-    # Cloud / SaaS 
+    # Cloud / SaaS
     "dropbox.com", "box.com",
     "notion.so", "airtable.com",
 
-    # Jeux 
+    # Gaming
     "steampowered.com", "epicgames.com",
     "riotgames.com", "blizzard.com",
     "playstation.com", "xbox.com",
 
-    # Médias
+    # Media
     "bbc.com", "cnn.com", "lemonde.fr",
     "nytimes.com", "theguardian.com",
 
-    # Gouvernement
+    # Government
     "service-public.fr", "gouv.fr",
     "impots.gouv.fr", "ameli.fr",
 
 })
 
-# Homoglyphes connus pour chaque marque - use frozenset for O(1) lookup
+# Known homoglyphs per brand - use frozenset for O(1) lookup
 BRAND_FAKES: dict[str, frozenset[str]] = {
     "amazon":    frozenset(("amaz0n", "amazoon")),
     "google":    frozenset(("g00gle", "googIe")),
@@ -609,7 +609,7 @@ def analyze_url(url: str) -> dict:
         ssl_info = _ssl_analysis(hostname)
         dns_info = _dns_reputation(hostname)
     if ml is not None:
-        # IA prioritaire : moins strict sur les zones grises
+        # ML prioritized: less strict in grey areas
         if html is None and h_score <= 10 and ml >= 75:
             score = 45
             verdict = "suspect"

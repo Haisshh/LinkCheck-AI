@@ -1,6 +1,7 @@
 # train.py
-# Entraînement du modèle LinkCheck depuis Training.parquet / Testing.parquet.
-# Aucune requête réseau. Rapide, reproductible.
+# train.py
+# Train the LinkCheck model from Training.parquet / Testing.parquet.
+# No network requests. Fast and reproducible.
 
 import os
 import sys

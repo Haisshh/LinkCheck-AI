@@ -2,6 +2,7 @@
 flask
 Flask-Limiter
 gunicorn
+flask-cors
 
 # Analyse de données et Machine Learning
 pandas

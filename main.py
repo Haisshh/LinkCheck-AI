@@ -51,7 +51,7 @@ logger = logging.getLogger("linkcheck.main")
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-only-change-me")
 
-CORS(app, resources={r"/analyze": {"origins": "*"}})  # Sécuriser la route /analyze avec CORS
+CORS(app, resources={r"/analyze": {"origins": "*"}})  # Secure the /analyze route with CORS
 
 def _rate_key() -> str:
     """
@@ -435,7 +435,7 @@ def _500(e):
     return jsonify({"error": "Erreur serveur"}), 500
 
 
-# ── Lancement ────────────────────────────────────────────────────────────
+# ── Launch ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     logger.info("[main] Starting — limit 30 req/min (analyze endpoint)")

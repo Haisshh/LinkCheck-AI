@@ -10,10 +10,10 @@ from urllib3.util import Retry
 
 from features import extract_features, FEATURE_NAMES
 
-# Désactiver les alertes SSL pour les sites suspects
+# Disable SSL warnings for suspicious sites
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Chemins
+# Paths
 PHISHING_CSV = "data/verified_online.csv"
 SAFE_ZIP = "data/tranco_GV97K-1m.csv.zip"
 OUTPUT_PATH = "data/scraped_data.csv"
@@ -44,7 +44,7 @@ def _get_session() -> requests.Session:
 
 
 def save_to_disk(results_list):
-    """Fonction utilitaire pour sauvegarder les données et vider la mémoire"""
+    """Helper function to save data and release memory."""
     if not results_list:
         return
     
@@ -52,7 +52,7 @@ def save_to_disk(results_list):
     if os.path.exists(OUTPUT_PATH):
         old_df = pd.read_csv(OUTPUT_PATH)
         combined_df = pd.concat([old_df, new_df], ignore_index=True)
-        # Supprimer les doublons basés sur les caractéristiques communes pour éviter de polluer l'IA
+        # Drop duplicates based on shared features to avoid polluting the training data
         common_features = [f for f in FEATURE_NAMES if f in combined_df.columns]
         if common_features:
             combined_df = combined_df.drop_duplicates(subset=common_features)
@@ -73,9 +73,9 @@ def _fetch_html(full_url: str) -> str:
 
 
 def run_scraper(n_sites=50000):
-    print(f"Lancement du méga-scraper (Objectif : {n_sites} sites)")
+    print(f"Starting the scraper (target: {n_sites} sites)")
     
-    # 1. Chargement des sources
+    # 1. Load sources
     try:
         df_p = pd.read_csv(PHISHING_CSV)
         col_url = 'url' if 'url' in df_p.columns else df_p.columns[1] 
@@ -93,7 +93,7 @@ def run_scraper(n_sites=50000):
         print(f"Erreur safe : {e}")
         urls_s = []
 
-    # 2. Fonction de traitement interne
+    # 2. Internal processing function
     current_results = []
     
     def process_links(url_list, label, category_name):
@@ -124,11 +124,11 @@ def run_scraper(n_sites=50000):
 
                 time.sleep(0.02)
 
-    # 3. Lancement
+    # 3. Start processing
     process_links(urls_p, 1, "PHISHING")
     process_links(urls_s, 0, "SAFE")
 
-    # 4. Sauvegarde finale des derniers éléments restants
+    # 4. Final save of remaining results
     if current_results:
         save_to_disk(current_results)
     

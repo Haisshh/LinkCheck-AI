@@ -70,7 +70,7 @@ def _entropy(s: str) -> float:
 
 
 def _word_stats(text: str) -> tuple[int, int, float]:
-    """Retourne (min_len, max_len, avg_len) des mots d'un segment d'URL."""
+    """Return (min_len, max_len, avg_len) for words in a URL segment."""
     words = [w for w in _RE_SPLIT_WORD.split(text) if w]
     if not words:
         return 0, 0, 0.0
@@ -257,9 +257,9 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
     has_fragment = int(bool(parsed.fragment))
     nb_params = len(query.split('&')) if query else 0
     has_https = int(parsed.scheme == 'https')
-    domain_age_like = int(len(domain) > 10 and not random_domain)  # Proxy pour l'âge du domaine
+    domain_age_like = int(len(domain) > 10 and not random_domain)  # Proxy for domain age
 
-    # Images de tracking dérivées
+    # Derived tracking image features
     nb_sm = nb_ext_img
     nb_sm_total = nb_ext_img * 2
     r_sm = round(nb_ext_img * 0.5, 2)
@@ -356,7 +356,7 @@ def extract_features(url: str, html_content: Optional[str] = None) -> dict:
         "nb_extSmallImgTotalRatioTotalFavicon":r_sm_total_fav,
         "nb_extCSS":                           nb_ext_css,
         "status_code":                         status_code,
-        # Nouvelles features
+        # New features
         "url_entropy":                         url_entropy,
         "domain_entropy":                      domain_entropy,
         "subdomain_entropy":                   subdomain_entropy,
