@@ -83,7 +83,7 @@ def tune_and_train(X_train, y_train, X_test, y_test, feat_names):
 
     best_model = grid_search.best_estimator_
 
-    # Évaluation sur le test set
+    # Evaluate on the test set
     y_pred = best_model.predict(X_test)
     logger.info("Accuracy sur test : %.2f%%", accuracy_score(y_test, y_pred) * 100)
     print(classification_report(y_test, y_pred))

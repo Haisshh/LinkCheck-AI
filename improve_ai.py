@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Pipeline complet pour améliorer l'IA LinkCheck :
-1. Préparer les données
-2. Entraîner le modèle de base
-3. Optimiser les hyperparamètres
-4. Évaluer les performances
+Complete pipeline for improving the LinkCheck AI:
+1. Prepare data
+2. Train base model
+3. Tune hyperparameters
+4. Evaluate performance
 """
 
 import subprocess
@@ -26,17 +26,17 @@ def run_command(cmd, description):
 def main():
     print("🚀 Démarrage du pipeline d'amélioration de l'IA LinkCheck")
 
-    # Étape 1: Préparer les données
-    run_command("python prepare_data.py", "Préparation des données")
+    # Step 1: Prepare data
+    run_command("python prepare_data.py", "Prepare data")
 
-    # Étape 2: Entraînement de base
-    run_command("python train.py", "Entraînement du modèle de base")
+    # Step 2: Train base model
+    run_command("python train.py", "Train base model")
 
-    # Étape 3: Optimisation des hyperparamètres
-    run_command("python tune.py", "Optimisation des hyperparamètres")
+    # Step 3: Tune hyperparameters
+    run_command("python tune.py", "Tune hyperparameters")
 
-    # Étape 4: Évaluation
-    run_command("python evaluate.py", "Évaluation des modèles")
+    # Step 4: Evaluate
+    run_command("python evaluate.py", "Evaluate models")
 
     print("\n✅ Pipeline terminé !")
     print("Modèles sauvegardés : model.pkl (base), model_tuned.pkl (optimisé)")

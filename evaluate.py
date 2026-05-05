@@ -26,13 +26,13 @@ def load_model_and_data(model_path):
     feat_names = joblib.load(FEAT_PATH)
     test_df = pd.read_parquet(TEST_PATH)
 
-    # Préparer X_test, y_test
+    # Prepare X_test and y_test
     drop_cols = {"url", "status"}
     drop_e = [c for c in drop_cols if c in test_df.columns]
     X_test = test_df.drop(columns=drop_e).fillna(0)
     y_test = test_df["status"] if "status" in test_df.columns else test_df["label"]
 
-    # Assurer que les colonnes correspondent
+    # Ensure columns match
     X_test = X_test[feat_names]
 
     return model, X_test, y_test
@@ -56,12 +56,12 @@ def evaluate_model(model, X_test, y_test, name):
     print(classification_report(y_test, y_pred))
 
 if __name__ == "__main__":
-    # Évaluer le modèle original
+    # Evaluate the original model
     model_orig, X_test, y_test = load_model_and_data(MODEL_PATH)
     if model_orig:
         evaluate_model(model_orig, X_test, y_test, "Original")
 
-    # Évaluer le modèle tuné
+    # Evaluate the tuned model
     model_tuned, _, _ = load_model_and_data(TUNED_MODEL_PATH)
     if model_tuned:
         evaluate_model(model_tuned, X_test, y_test, "Tuné")

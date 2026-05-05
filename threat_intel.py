@@ -2,20 +2,20 @@
 # Threat intelligence via 5 free APIs, all running in parallel.
 # Each call is isolated: if one API fails, the others continue.
 #
-# APIs intégrées :
-#   1. VirusTotal       — 4 req/min gratuit (clé requise)
-#   2. URLhaus          — 100% gratuit, sans clé, base de 3M+ URLs malveillantes
-#   3. PhishTank        — gratuit, spécialisé phishing (clé optionnelle)
-#   4. Google Safe Browsing — gratuit, 10 000 req/jour (clé requise)
-#   5. IPQualityScore   — gratuit, 200 req/jour (clé requise)
+# Built-in APIs:
+#   1. VirusTotal       — 4 req/min free (API key required)
+#   2. URLhaus          — 100% free, no key required, 3M+ known malicious URLs
+#   3. PhishTank        — free, phishing-focused (optional API key)
+#   4. Google Safe Browsing — free, 10,000 req/day (API key required)
+#   5. IPQualityScore   — free, 200 req/day (API key required)
 #
-# Configuration dans .env :
+# Configure keys in .env:
 #   VIRUSTOTAL_API_KEY=...
 #   GOOGLE_SAFE_BROWSING_API_KEY=...
 #   IPQS_API_KEY=...
-#   PHISHTANK_API_KEY=...          (optionnel — fonctionne sans)
+#   PHISHTANK_API_KEY=...          (optional)
 #
-# Toutes les clés sont optionnelles : si absente, l'API est ignorée silencieusement.
+# All keys are optional: missing keys silently disable the API.
 
 import os
 import time
@@ -33,7 +33,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger("linkcheck.threat_intel")
 
-# ── Clés API (chargées depuis .env via main.py) ───────────────────────────────
+# ── API keys loaded from .env via main.py ──────────────────────────────────
 
 _VT_KEY    = os.environ.get("VIRUSTOTAL_API_KEY", "")
 _GSB_KEY   = os.environ.get("GOOGLE_SAFE_BROWSING_API_KEY", "")
@@ -41,15 +41,15 @@ _IPQS_KEY  = os.environ.get("IPQS_API_KEY", "")
 _PT_KEY    = os.environ.get("PHISHTANK_API_KEY", "")  # optionnel
 _URLHAUS_KEY = os.environ.get("URLHAUS_AUTH_KEY", "")
 
-# ── Pool de threads dédié (séparé du pool screenshot) ────────────────────────
-# max_workers=5 = une requête par API en parallèle
+# ── Dedicated thread pools (separate from screenshot pool) ─────────────────
+# max_workers=5 = one request per API in parallel
 _ASYNC_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="threat_intel_orchestrator")
 _API_POOL = ThreadPoolExecutor(max_workers=5, thread_name_prefix="threat_intel_api")
 
-# Timeout réseau strict par API
-_TIMEOUT = 6  # secondes
+# Strict network timeout per API
+_TIMEOUT = 6  # seconds
 
-# ── Session HTTP partagée ─────────────────────────────────────────────────────
+# ── Shared HTTP session ─────────────────────────────────────────────────────
 _thread_local = local()
 
 
@@ -164,9 +164,9 @@ def _virustotal(url: str) -> dict:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. URLHAUS (Abuse.ch)
-# Doc : https://urlhaus-api.abuse.ch/
-# Gratuit : sans clé, sans limite officielle
-# Base : 3M+ URLs malveillantes connues
+# Doc: https://urlhaus-api.abuse.ch/
+# Free: no key required, no official limit
+# Database: 3M+ known malicious URLs
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _urlhaus(url: str) -> dict:
@@ -234,9 +234,9 @@ def _urlhaus(url: str) -> dict:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. PHISHTANK
-# Doc : https://phishtank.org/api_info.php
-# Gratuit : clé optionnelle (limite plus haute avec clé)
-# Base : spécialisée phishing, vérifiée par la communauté
+# Doc: https://phishtank.org/api_info.php
+# Free: optional key, higher limits with key
+# Database: phishing-focused, community verified
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _phishtank(url: str) -> dict:
@@ -298,9 +298,9 @@ def _phishtank(url: str) -> dict:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. GOOGLE SAFE BROWSING
-# Doc : https://developers.google.com/safe-browsing/v4/lookup-api
-# Gratuit : 10 000 req/jour (clé Google Cloud requise)
-# Couvre : malware, phishing, unwanted software, social engineering
+# Doc: https://developers.google.com/safe-browsing/v4/lookup-api
+# Free: 10,000 req/day (Google Cloud API key required)
+# Covers: malware, phishing, unwanted software, social engineering
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _google_safe_browsing(url: str) -> dict:
@@ -371,9 +371,9 @@ def _google_safe_browsing(url: str) -> dict:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. IPQUALITYSCORE
-# Doc : https://www.ipqualityscore.com/documentation/malicious-url-scanner-api
-# Gratuit : 200 req/jour (clé requise, inscription gratuite)
-# Détecte : phishing, malware, parking, spamming, short URLs
+# Doc: https://www.ipqualityscore.com/documentation/malicious-url-scanner-api
+# Free: 200 req/day (API key required, free signup)
+# Detects: phishing, malware, parking, spamming, short URLs
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _ipqualityscore(url: str) -> dict:
@@ -427,7 +427,7 @@ def _ipqualityscore(url: str) -> dict:
             "phishing":       phishing,
             "malware":        malware,
             "suspicious":     suspicious,
-            "parking":        data.get("parking", False),   # domaine parké = suspect
+            "parking":        data.get("parking", False),   # parked domain is suspicious
             "spamming":       data.get("spamming", False),
             "adult":          data.get("adult", False),
             "category":       data.get("category", ""),
@@ -453,11 +453,11 @@ def _ipqualityscore(url: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ORCHESTRATEUR PRINCIPAL
-# Lance toutes les APIs disponibles en parallèle
+# MAIN ORCHESTRATOR
+# Runs all available APIs in parallel
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Mapping nom → fonction
+# Name-to-function mapping
 _APIS = {
     "virustotal":          _virustotal,
     "urlhaus":             _urlhaus,
@@ -502,7 +502,7 @@ def query_all(url: str) -> dict:
         "elapsed_ms": int,
     }
     """
-    # Cache avec TTL manuel (lru_cache ne supporte pas le TTL natif)
+    # Manual TTL cache (lru_cache has no native TTL support)
     now = time.monotonic()
     with _cache_lock:
         cached = _cache.get(url)
@@ -518,11 +518,10 @@ def query_all(url: str) -> dict:
         _cache[url] = (now, copy.deepcopy(result))
     return result
 
-    # Mettre à jour le cache
-    _cached_threat_intel.cache_clear()  # vide le cache précédent pour cette URL
+    # Update cache
+    _cached_threat_intel.cache_clear()  # clear the previous cache for this URL
     _cache_timestamps[url] = now
-    # On ne peut pas injecter dans lru_cache directement, donc on rappelle
-    # pour populer le cache avec le nouveau résultat
+    # Cannot inject into lru_cache directly, so call again to populate the cache wrapper
     _cached_threat_intel.__wrapped__ = lambda u: result  # type: ignore
     return result
 
@@ -531,7 +530,7 @@ def _run_all_apis(url: str) -> dict:
     """Execute all APIs concurrently and aggregate results."""
     t0 = time.monotonic()
 
-    # Soumettre toutes les APIs en parallèle
+    # Submit all APIs in parallel
     futures: dict[Future, str] = {
         _API_POOL.submit(fn, url): name
         for name, fn in _APIS.items()
@@ -539,7 +538,7 @@ def _run_all_apis(url: str) -> dict:
 
     sources: dict[str, dict] = {}
 
-    # Collecter les résultats avec timeout global de 8s
+    # Collect results with a global 8s timeout
     try:
         for future in as_completed(futures, timeout=8):
             name = futures[future]
@@ -564,19 +563,19 @@ def _run_all_apis(url: str) -> dict:
                 "error":     "Global timeout >8s",
             }
 
-    # ── Agrégation ────────────────────────────────────────────────
+    # ── Aggregation ───────────────────────────────────────────────
     flagged_by = [
         name for name, src in sources.items()
         if src.get("available") and src.get("is_malicious")
     ]
 
-    # Score de menace agrégé (pondéré par fiabilité de chaque source)
+    # Aggregated threat score (weighted by source reliability)
     weights = {
-        "virustotal":           0.35,   # le plus fiable
-        "google_safe_browsing": 0.25,   # très fiable, faux positifs rares
-        "ipqualityscore":       0.20,   # bon signal complémentaire
-        "urlhaus":              0.12,   # spécialisé malware
-        "phishtank":            0.08,   # spécialisé phishing mais parfois lent
+        "virustotal":           0.35,   # most reliable
+        "google_safe_browsing": 0.25,   # very reliable, few false positives
+        "ipqualityscore":       0.20,   # good complementary signal
+        "urlhaus":              0.12,   # malware-focused
+        "phishtank":            0.08,   # phishing-focused, sometimes slower
     }
 
     weighted_sum   = 0.0
@@ -605,7 +604,7 @@ def _run_all_apis(url: str) -> dict:
         weight_used  += w
 
     threat_score = round(weighted_sum / weight_used) if weight_used > 0 else 0
-    is_malicious = len(flagged_by) >= 1  # une seule source suffit
+    is_malicious = len(flagged_by) >= 1  # a single source is enough
 
     elapsed = round((time.monotonic() - t0) * 1000)
 
