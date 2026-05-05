@@ -189,6 +189,12 @@ def index():
     return render_template("index.html")
 
 
+@app.post("/analyze")
+def analyze():
+    """Analyze a URL from the UI and return structured JSON."""
+    return api_analyze()
+
+
 @app.post("/api/analyze")
 def api_analyze():
     """
