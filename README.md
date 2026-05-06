@@ -35,6 +35,20 @@ Open:
 http://127.0.0.1:5000
 ```
 
+## Frontend Setup
+
+This project uses a React + Tailwind frontend. Install Node.js 18+ or 20+ first.
+
+From the project root:
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+Then run the Flask server from the repository root. The React app is built into `static/frontend` and served by Flask.
+
 ## Environment Variables
 
 Create `.env` from `.env.example`, then fill the keys you have:

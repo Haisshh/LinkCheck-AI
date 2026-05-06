@@ -25,6 +25,10 @@ __pycache__/
 # Screenshots temporaires
 static/screenshots/
 
+# Frontend build
+frontend/node_modules/
+static/frontend/
+
 # IDE
 .vscode/
 .idea/
