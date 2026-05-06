@@ -1,7 +1,13 @@
-# Use Python 3.11 slim image for smaller size
-FROM python:3.11-slim
+# Build the frontend in a separate stage so the final image remains small.
+FROM node:20-alpine AS frontend-build
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+COPY frontend .
+RUN npm run build
 
-# Set working directory
+# Final runtime image
+FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies for Chrome/Selenium
@@ -18,12 +24,13 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
+
+# Copy frontend build output into static/frontend
+COPY --from=frontend-build /app/static/frontend ./static/frontend
 
 # Create necessary directories
 RUN mkdir -p static/screenshots data
