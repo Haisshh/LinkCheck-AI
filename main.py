@@ -65,8 +65,8 @@ def _rate_key() -> str:
     return fwd.split(",")[0].strip() if fwd else (request.remote_addr or "unknown")
 
 limiter = Limiter(
-    _rate_key,
     app=app,
+    key_func=_rate_key,
     default_limits=["30 per minute"],
     storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
 )
