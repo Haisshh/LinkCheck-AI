@@ -4,7 +4,7 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install
 COPY frontend .
-RUN npm run build
+RUN mkdir -p ../static/frontend && npm run build
 
 # Final runtime image
 FROM python:3.11-slim
