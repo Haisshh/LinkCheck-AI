@@ -14,7 +14,6 @@ from functools import lru_cache
 import pandas as pd
 from flask import Flask, abort, jsonify, render_template, request, send_file
 from flask_limiter import Limiter
-from flask_cors import CORS
 
 
 def _load_dotenv(path: str = ".env") -> None:
@@ -48,10 +47,15 @@ logger = logging.getLogger("linkcheck.main")
 
 # ── App Flask ────────────────────────────────────────────────────────────
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    # Vite writes the production build into static/frontend/
+    # Serving it as the static folder lets Flask handle all assets directly.
+    static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "frontend"),
+    static_url_path="",        # /assets/... served at root, no /static/ prefix
+    template_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates"),
+)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-only-change-me")
-
-CORS(app, resources={r"/analyze": {"origins": "*"}})  # Secure the /analyze route with CORS
 
 def _rate_key() -> str:
     """
@@ -65,8 +69,8 @@ def _rate_key() -> str:
     return fwd.split(",")[0].strip() if fwd else (request.remote_addr or "unknown")
 
 limiter = Limiter(
+    _rate_key,
     app=app,
-    key_func=_rate_key,
     default_limits=["30 per minute"],
     storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
 )
@@ -185,20 +189,23 @@ _load_tranco()
 
 @app.get("/")
 def index():
-    """Serve the main UI."""
-    return render_template("index.html")
+    """Serve the React app (Vite build at static/frontend/index.html)."""
+    idx = os.path.join(app.static_folder, "index.html")
+    if not os.path.exists(idx):
+        # Build has not been run yet — show a helpful message
+        return (
+            "<h2 style='font-family:sans-serif;padding:2rem'>Frontend not built</h2>"
+            "<p style='font-family:monospace'>Run: <b>cd frontend && npm ci && npm run build</b></p>",
+            503,
+        )
+    return send_file(idx)
 
 
 @app.post("/analyze")
+@limiter.limit("30 per minute")
 def analyze():
-    """Analyze a URL from the UI and return structured JSON."""
-    return api_analyze()
-
-
-@app.post("/api/analyze")
-def api_analyze():
     """
-    Developer API: analyze a URL and return structured JSON.
+    Analyze a URL for phishing/fraud indicators.
     
     Request body:
     {
@@ -206,20 +213,21 @@ def api_analyze():
     }
     
     Returns:
-    JSON with detailed analysis (score, verdict, reasons, etc.)
+        JSON with analysis results (score, verdict, reasons, etc.)
     """
+    ip = _rate_key()
     body = request.get_json(silent=True) or {}
     url = str(body.get("url", "")).strip()
 
     if not url:
-        return jsonify({"error": "Missing URL", "code": "MISSING_URL"}), 400
+        return jsonify({"error": "Empty URL"}), 400
     if len(url) > 2000:
-        return jsonify({"error": "URL too long (max 2000 characters)", "code": "URL_TOO_LONG"}), 400
+        return jsonify({"error": "URL too long (max 2000 chars)"}), 400
 
-    logger.info("[api] %s → %s", _rate_key(), url[:80])
+    logger.info("[main] %s → %s", ip, url[:80])
     result = analyze_url(url)
 
-    # Tranco enrichment
+    # Enrichissement Tranco (IA + Réputation)
     domain = result.get("analyzed_host", "")
     rank = _REPUTATION.get(domain) or _REPUTATION.get(".".join(domain.split(".")[-2:]))
 
@@ -230,19 +238,19 @@ def api_analyze():
             result["verdict"] = "safe" if result["score"] <= 40 else result["verdict"]
             result["is_phishing"] = result["verdict"] != "safe"
             result["reasons"].insert(0, {
-                "text": f"Site très populaire (Tranco #{rank}) - confiance boostée",
+                "text": f"Highly popular site (Tranco #{rank}) - trust boosted",
                 "points": -25, "severity": "safe",
             })
         elif rank <= 10_000:
             result["score"] = max(0, round(result["score"] * 0.8))
             result["reasons"].insert(0, {
-                "text": f"Site populaire (Tranco #{rank}) - confiance ajustée",
+                "text": f"Popular site (Tranco #{rank}) - trust adjusted",
                 "points": -20, "severity": "safe",
             })
         elif rank <= 100_000:
             result["score"] = max(0, round(result["score"] * 0.9))
             result["reasons"].insert(0, {
-                "text": f"Site connu (Tranco #{rank})",
+                "text": f"Known site (Tranco #{rank})",
                 "points": -10, "severity": "info",
             })
         elif rank <= 800_000:
@@ -253,7 +261,7 @@ def api_analyze():
             })
         else:
             result["reasons"].append({
-                "text": f"Rang Tranco élevé (#{rank}) - réputation faible",
+                "text": f"High Tranco rank (#{rank}) - weak reputation",
                 "points": 0, "severity": "info",
             })
         result["tranco_score"] = _tranco_score(rank)
@@ -363,7 +371,7 @@ def feedback():
     body = request.get_json(silent=True) or {}
     url = str(body.get("url", "")).strip()
     if not url:
-        return jsonify({"error": "Missing URL", "code": "MISSING_URL"}), 400
+        return jsonify({"error": "URL manquante"}), 400
 
     analyzed_host = str(body.get("analyzed_host", "")).strip()
     verdict = str(body.get("verdict", "")).strip()
@@ -441,7 +449,7 @@ def _500(e):
     return jsonify({"error": "Erreur serveur"}), 500
 
 
-# ── Launch ───────────────────────────────────────────────────────────────
+# Lancement
 
 if __name__ == "__main__":
     logger.info("[main] Starting — limit 30 req/min (analyze endpoint)")
